@@ -11,11 +11,14 @@ Built billing first (Phase 1 of Option 3). The screens follow the wireframes and
 
 ## Environments
 
-| Environment | Supabase project | Data | Updated |
-|---|---|---|---|
-| Local | Test project (no Docker needed) | Test data | As you save |
-| Test (staging) | `kyfqdevrvihtjfugmzrx` | Demo data plus Wayne's reference data | When migrations are pushed or merged |
-| Production | Not created yet | Real data only | Approved releases only |
+| Environment | Web app | Supabase project | Data | Updated |
+|---|---|---|---|---|
+| Local | `npm run dev` | Test project (no Docker needed) | Test data | As you save |
+| Preview | Vercel, one link per pull request | Test project | Test data | Each push to a pull request |
+| Test (staging) | Vercel project `enabla-technology/jet-platform` (Vercel calls this "Production") | `kyfqdevrvihtjfugmzrx` | Demo data plus Wayne's reference data | Each merge to `main` |
+| Production | Not created yet (its own Vercel and Supabase projects) | Not created yet | Real data only | Approved releases only |
+
+Vercel needs `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (Production and Preview). Every Vercel address must also be listed in Supabase under **Authentication → URL Configuration → Redirect URLs**, including the preview wildcard `https://jet-platform-*-enabla-technology.vercel.app/**`.
 
 ## Run it locally
 

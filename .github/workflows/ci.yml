@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - name: Database migrations and row-level security tests
+        run: npm run test:db
+      - name: Build
+        run: npm run build
+        env:
+          # Public values only; the build doesn't contact Supabase.
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci

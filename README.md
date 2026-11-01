@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Jet Platform
 
-## Getting Started
+The rebuild of Jet Worldwide's systems: customer portal, JetStream (billing and back office), JetSales and automations, on one Supabase database.
+Built billing first (Phase 1 of Option 3). The screens follow the wireframes and the clickable prototype in the parent folder.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router, TypeScript). Read `AGENTS.md` before changing framework code: this version differs from older Next.js.
+- **Supabase** (Postgres, Auth, row-level security). Decision D10: Supabase for the whole project.
+- Styles are ported from the prototype (`src/app/globals.css`), so screens match the wireframes.
+
+## Environments
+
+| Environment | Supabase project | Data | Updated |
+|---|---|---|---|
+| Local | Test project (no Docker needed) | Test data | As you save |
+| Test (staging) | `kyfqdevrvihtjfugmzrx` | Demo data plus Wayne's reference data | When migrations are pushed or merged |
+| Production | Not created yet | Real data only | Approved releases only |
+
+## Run it locally
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # then fill in the Test project's URL and publishable key
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Sign-in is by emailed link. In the Supabase dashboard, **Authentication → URL Configuration** must list `http://localhost:3000/**` as a redirect URL.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Database
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `supabase/migrations/`: every schema change, in order. Never edit the database by hand; add a migration.
+- `supabase/seed.sql`: demo data for local and Test only.
+- `npm run test:db`: runs all migrations and the seed in an in-memory Postgres (PGlite), then checks the access rules as management, a sales rep, a customer, an uninvited sign-in and a signed-out visitor.
 
-## Learn More
+Apply migrations to the Test project (after `npx supabase login` and `npx supabase link --project-ref kyfqdevrvihtjfugmzrx`):
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npx supabase db push --linked --include-seed
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Access rules (row-level security)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Staff** (owner, management, finance, customer service, admin) see every customer and job, including cost and margin.
+- **Billing staff** (owner, management, finance, admin) can change billing data.
+- **Sales reps** see only their own accounts, never cost or margin.
+- **Customers** see only their own account, never cost.
+- Everyone reads jobs through the `job_list` view, which applies the row and column rules. Only staff can read the `jobs` table directly.
+- Every change to profiles, customers, jobs, reweighs, services and fuel is written to `audit_log` with who made it.
 
-## Deploy on Vercel
+### Users and roles
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Staff are invited by adding a row to `user_invites` (email, name, role, branch). Their first sign-in creates their profile with that role. Anyone who signs in without an invite gets a customer profile with no account, so they see nothing.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Checks
+
+GitHub Actions runs lint, the database tests and a build on every pull request and every push to `main`.

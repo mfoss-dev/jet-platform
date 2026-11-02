@@ -370,6 +370,8 @@ const run = async () => {
 
     const part = await credit([{ id: line.id, amount: 10 }], 'Wrong price');
     await refused(`select public.approve_credit_note($1)`, [part], /Someone else in management/, 'over the limit, the raiser cannot approve their own');
+    const approvers = async (id) => (await db.query(`select email from public.credit_note_approvers($1) order by email`, [id])).rows.map((x) => x.email);
+    assert.deepEqual(await approvers(part), ['nigel@jetworldwide.example'], "a manager's own credit goes to the other manager");
     assert.deepEqual(await totals(part).then((t) => [t.ex, t.status, t.number]), [-10, 'draft', null], 'part of a line, as a draft');
     await db.exec('savepoint c1');
     await assert.rejects(credit([{ id: line.id, amount: line.ex }], 'Again'), /can be credited up to/, 'draft credits count against the line');
@@ -388,6 +390,7 @@ const run = async () => {
     const r = await totals(rest);
     assert.ok(Math.abs(r.total + (await totals(part)).total + inv.total) < 0.005, 'the two credits clear the invoice exactly');
     assert.deepEqual(Object.values(await one(`select needs_management, i_can_approve from public.credit_note_queue where id = $1`, [rest])), [true, false]);
+    assert.deepEqual(await approvers(rest), ['chris@jetworldwide.example'], 'Sydney finance credits go to Sydney management');
     await become(chris, 'chris@jetworldwide.example');
     assert.equal((await one(`select i_can_approve from public.credit_note_queue where id = $1`, [rest])).i_can_approve, true);
     await db.query(`select public.approve_credit_note($1)`, [rest]);

@@ -13,7 +13,7 @@ type Invoice = {
   charge_total: number; fuel_total: number; security_total: number; gst_total: number; total: number; status: string; flags: string[]; source: string | null;
   credit_for: string | null; reason: string | null; approved_at: string | null;
   bill_to: { id: string; name: string; account_code: string; invoice_recipients: string | null } | null;
-  rebill_to: { name: string; account_code: string } | null; original: { id: string; number: number | null } | null;
+  rebill_to: { name: string; account_code: string } | null;
 };
 type Credit = { id: string; number: number | null; status: string; invoice_date: string; total: number; reason: string | null };
 type Line = {
@@ -42,7 +42,8 @@ export default async function InvoiceView({ params, searchParams }: PageProps<'/
   ]);
   if (!data) notFound();
   const raw = data as unknown as Invoice;
-  const inv = { ...raw, bill_to: one(raw.bill_to), rebill_to: one(raw.rebill_to), original: one(raw.original) };
+  const { data: original } = raw.credit_for ? await supabase.from(SELECTS.credits.table).select('id, number').eq('id', raw.credit_for).maybeSingle() : { data: null };
+  const inv = { ...raw, bill_to: one(raw.bill_to), rebill_to: one(raw.rebill_to), original: original as { id: string; number: number | null } | null };
   const isCredit = inv.kind === 'credit';
   const credits = (creditData ?? []) as unknown as Credit[];
   const creditedTotal = credits.reduce((a, c) => a + Number(c.total), 0);

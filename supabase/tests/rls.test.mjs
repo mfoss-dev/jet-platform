@@ -166,65 +166,75 @@ const run = async () => {
   }
   results.push('  ✓ holds need a reason, finance sees customer history, margins are staff only');
 
-  // ---- tariffs
+  // ---- tariffs (JetStream's rules, Rating.vb)
   const V1 = '7b000000-0000-4000-8000-000000000001', V2 = '7b000000-0000-4000-8000-000000000002';
+  const KEY = '7c000000-0000-4000-8000-000000000002', ZSET = '7d000000-0000-4000-8000-000000000001';
   const HARBOUR = 'c0000000-0000-4000-8000-000000000001';
-  const cell = async (v, toKg, zone = '6') => Number((await one(`select charge from public.tariff_cells where version_id = $1 and kind = 'parcel' and to_kg = $2 and zone_code = $3`, [v, toKg, zone])).charge);
-  const charge = async (v, w, zone = '6') => Number((await one(`select public.tariff_charge($1, $2, 'parcel', $3) as c`, [v, zone, w])).c);
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const fc = async (v, w, kind = 'parcel', zone = '6', sales = KEY) =>
+    (await one(`select public.freight_charge($1, $2, $3, $4, $5) as c`, [v, sales, zone, kind, w])).c;
   await as(chris, 'chris@jetworldwide.example', async () => {
-    assert.equal(await charge(V1, 0.4), await cell(V1, 0.5), 'flat break: 0.4 kg costs the 0.5 kg price');
-    assert.equal(await charge(V1, 3.2), Math.round((await cell(V1, 2) + 3 * await cell(V1, 5)) * 100) / 100, 'per-step break: the 2 kg price plus three 0.5 kg steps');
-    assert.equal(await charge(V1, 40), Math.round(40 * await cell(V1, 300) * 100) / 100, 'per-kg break: the rate times the whole weight');
-    assert.equal((await one(`select public.tariff_charge($1, '6', 'parcel', 500) as c`, [V1])).c, null, 'heavier than the last break has no price');
-    const p = await one(`select * from public.price_shipment($1, '6', 'parcel', 3.2, '2026-06-01')`, [HARBOUR]);
-    assert.deepEqual([p.sales_tariff, p.version, Number(p.margin_pct)], ['KEY', 1, 29]);
-    assert.equal(Number(p.price), Math.round(Number(p.base_charge) * 1.29 * 100) / 100);
+    // Zone 6 demo rates: parcel 24.55 (first 0.5), 3.23 per 0.5 to 2 kg, 3.10 per 0.5 to 30 kg, 6.01/kg above; doc 20.07.
+    // Key accounts margins by break: 30%, 29%, 28%, 25% (documents 30%).
+    assert.equal(Number(await fc(V1, 0.3)), r2(24.55 * 1.30), 'first step');
+    assert.equal(Number(await fc(V1, 3.2)), r2(24.55 * 1.30 + 3 * 3.23 * 1.29 + 3 * 3.10 * 1.28), 'margin applied row by row, steps counted from the start');
+    assert.equal(Number(await fc(V1, 40)), r2(40 * r2(6.01 * 1.25)), 'per kg on the whole weight, rate rounded first');
+    assert.equal(Number(await fc(V1, 0.4, 'doc')), r2(20.07 * 1.30), 'documents');
+    assert.equal(Number(await fc(V1, 1.5, 'doc')), Number(await fc(V1, 1.5, 'parcel')), 'documents over the documents breaks price as parcels');
+    assert.equal(await fc(V1, 500), null, 'heavier than the last break');
+    assert.equal((await one(`select public.find_zone($1, $2, 'AU', '2000', 'GB', 'SW1A 1AA') as z`, [ZSET, HARBOUR])).z, '6');
+    const p = await one(`select * from public.price_shipment($1, 'INTOUTEXP', 'AU', '2000', 'GB', 'SW1A', 'parcel', 3.2, '2026-06-01')`, [HARBOUR]);
+    assert.deepEqual([p.sales_tariff, p.version, p.zone_code, p.volumetric_divisor, p.problem], ['KEY', 1, '6', 5000, null]);
+    assert.equal(Number(p.price), Number(await fc(V1, 3.2)));
   });
-  results.push('  ✓ tariff pricing follows JetStream: flat, per-step and per-kg breaks, plus the sales margin');
+  // A customer's own zone lane wins over the general one.
+  await db.query(`insert into public.zone_lanes (zone_set_id, customer_id, orig_group, dest_group, zone_code) values ($1, $2, 'AU', 'GB', '7')`, [ZSET, HARBOUR]);
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    assert.equal((await one(`select public.find_zone($1, $2, 'AU', '2000', 'GB', '') as z`, [ZSET, HARBOUR])).z, '7');
+    assert.equal((await one(`select public.find_zone($1, null, 'AU', '2000', 'GB', '') as z`, [ZSET])).z, '6');
+  });
+  await db.query(`delete from public.zone_lanes where customer_id is not null`);
+  results.push('  ✓ pricing follows JetStream: margins per row, documents fall back to parcels, per-kg on whole weight, zone lookup with customer overrides');
 
   await as(monica, 'monica@jetworldwide.example', async () => {
     await db.exec('savepoint locked');
-    await assert.rejects(db.query(`update public.tariff_cells set charge = 1 where version_id = $1`, [V1]), /published and locked/);
+    await assert.rejects(db.query(`update public.tariff_rates set charge = 1 where version_id = $1`, [V1]), /published and locked/);
     await db.exec('rollback to savepoint locked');
-    const breaks = (await db.query(`select kind, to_kg, method, step_kg from public.tariff_breaks where version_id = $1 order by kind, to_kg`, [V2])).rows;
-    const cells = (await db.query(`select kind, to_kg, zone_code, charge from public.tariff_cells where version_id = $1`, [V2])).rows;
-    const payload = breaks.map((b) => ({ ...b, to_kg: Number(b.to_kg), step_kg: Number(b.step_kg),
-      cells: Object.fromEntries(cells.filter((c) => c.kind === b.kind && Number(c.to_kg) === Number(b.to_kg)).map((c) => [c.zone_code, Number(c.charge) + (c.zone_code === '6' ? 1 : 0)])) }));
-    const changed = (await one(`select public.save_tariff_draft($1, $2::jsonb, 'Zone 6 +$1') as n`, [V2, JSON.stringify(payload)])).n;
-    assert.equal(changed, breaks.length, 'one zone-6 cell per break changed');
-    assert.equal(Number((await one(`select count(*) from public.audit_log where table_name = 'tariff_cells' and actor_email = 'monica@jetworldwide.example'`)).count), 1, 'the save is one audit entry');
+    const docCharge = Number((await one(`select charge from public.tariff_rates where version_id = $1 and zone_code = '6' and kind = 'doc'`, [V2])).charge);
+    const n = (await one(`select public.upsert_tariff_rates($1, $2::jsonb, 'Zone 6 parcels') as n`, [V2, JSON.stringify([
+      { zone_code: '6', kind: 'parcel', from_kg: 0, to_kg: 0.5, step_kg: 0.5, method: 'I', charge: 30 },
+      { zone_code: '6', kind: 'doc', from_kg: 0, to_kg: 0.5, step_kg: 0.5, method: 'I', charge: docCharge },
+    ])])).n;
+    assert.equal(n, 1, 'only changed rows count');
+    assert.equal(Number((await one(`select public.adjust_tariff_draft($1, 10, '1', null) as n`, [V2])).n), 5, '+10% on zone 1 only');
+    assert.equal(Number((await one(`select public.delete_tariff_rates($1, $2::jsonb) as n`, [V2, JSON.stringify([{ zone_code: '7', kind: 'doc', to_kg: 0.5 }])])).n), 1);
+    assert.equal(Number((await one(`select count(*) from public.audit_log where table_name = 'tariff_rates' and actor_email = 'monica@jetworldwide.example'`)).count), 3, 'one audit entry per save');
+    assert.equal(Number((await one(`select public.save_sales_margins($1, $2::jsonb) as n`, [KEY, JSON.stringify([
+      { zone_code: '6', kind: 'parcel', to_kg: 0.5, margin_pct: 31 }, { zone_code: '7', kind: 'doc', to_kg: 0.5, margin_pct: null }])])).n), 2);
     await db.exec('savepoint publish');
     await assert.rejects(db.query(`select public.publish_tariff_version($1, '2027-01-01')`, [V2]), /Only management/);
     await db.exec('rollback to savepoint publish');
+    const v = (await one(`select public.create_rate_card('TNT.DOM.ROAD', 'TNT Road', 'AU', 'TNT', 'DOMESTROAD', null, null) as id`)).id;
+    assert.equal(Number((await one(`select volumetric_divisor from public.tariff_versions where id = $1`, [v])).volumetric_divisor), 4000, 'domestic cards default to divisor 4000');
   });
   await as(chris, 'chris@jetworldwide.example', async () => {
     await db.exec('savepoint early');
     await assert.rejects(db.query(`select public.publish_tariff_version($1, '2025-12-01')`, [V2]), /Start date must be after/);
     await db.exec('rollback to savepoint early');
     await db.query(`select public.publish_tariff_version($1, '2027-01-01')`, [V2]);
-    assert.equal((await one(`select * from public.price_shipment($1, '6', 'parcel', 3.2, '2026-12-31')`, [HARBOUR])).version, 1);
-    assert.equal((await one(`select * from public.price_shipment($1, '6', 'parcel', 3.2, '2027-01-01')`, [HARBOUR])).version, 2);
+    assert.equal((await one(`select * from public.price_shipment($1, 'INTOUTEXP', 'AU', '2000', 'GB', '', 'parcel', 3.2, '2026-12-31')`, [HARBOUR])).version, 1);
+    assert.equal((await one(`select * from public.price_shipment($1, 'INTOUTEXP', 'AU', '2000', 'GB', '', 'parcel', 3.2, '2027-01-01')`, [HARBOUR])).version, 2);
     const v3 = (await one(`select public.new_tariff_draft($1) as id`, [V2])).id;
-    assert.equal(Number((await one(`select count(*) from public.tariff_cells where version_id = $1`, [v3])).count), Number((await one(`select count(*) from public.tariff_cells where version_id = $1`, [V2])).count));
+    assert.equal(Number((await one(`select count(*) from public.tariff_rates where version_id = $1`, [v3])).count), Number((await one(`select count(*) from public.tariff_rates where version_id = $1`, [V2])).count));
   });
   for (const [id, email] of [[sam, 'sam@jetworldwide.example'], [priya, 'priya@harbouroptics.example']]) {
     await as(id, email, async () => {
-      assert.equal(Number((await one('select count(*) from public.tariff_cells')).count), 0, `${email} must not see rates`);
-      assert.equal((await one(`select problem from public.price_shipment($1, '6', 'parcel', 3.2)`, [HARBOUR])).problem, 'The customer has no sales tariff on this date');
+      assert.equal(Number((await one('select count(*) from public.tariff_rates')).count), 0, `${email} must not see rates`);
+      assert.equal(Number((await one('select count(*) from public.zone_lanes')).count), 0, `${email} must not see zones`);
+      assert.equal((await one(`select problem from public.price_shipment($1, 'INTOUTEXP', 'AU', '2000', 'GB', '', 'parcel', 3.2)`, [HARBOUR])).problem, 'The customer has no sales tariff for this service on this date');
     });
   }
-  await as(monica, 'monica@jetworldwide.example', async () => {
-    const v = (await one(`select public.create_rate_card('TNT-ROAD-AU', 'TNT Road (Sydney)', 'AU', 'TNT', null, $1) as id`, [V1])).id;
-    const t = await one(`select v.status, v.version, b.code from public.tariff_versions v join public.base_tariffs b on b.id = v.tariff_id where v.id = $1`, [v]);
-    assert.deepEqual([t.status, t.version, t.code], ['draft', 1, 'TNT-ROAD-AU']);
-    assert.equal(Number((await one(`select count(*) from public.tariff_cells where version_id = $1`, [v])).count), Number((await one(`select count(*) from public.tariff_cells where version_id = $1`, [V1])).count), 'copied with its prices');
-    const blank = (await one(`select public.create_rate_card('FEDEX-IP-AU', 'FedEx IP', 'AU', 'FEDEX') as id`)).id;
-    assert.equal(Number((await one(`select count(*) from public.tariff_breaks where version_id = $1`, [blank])).count), 0);
-  });
-  await as(sam, 'sam@jetworldwide.example', async () => {
-    await assert.rejects(db.query(`select public.create_rate_card('X', 'X', 'AU', 'DHL')`), /Only finance and management/);
-  });
-  results.push('  ✓ new rate cards start as drafts (blank or copied); published rate cards are locked; finance edits drafts (one audit entry), management publishes; right version by date; rates staff only');
+  results.push('  ✓ drafts edit by row, by % or by delete (one audit entry each); published locked; management publishes; right version by date; staff only');
 };
 
 try {

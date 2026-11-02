@@ -45,9 +45,11 @@ export async function assignTariff(formData: FormData) {
   const go = (msg: string): never => redirect(`/stream/customers/${id}?msg=${encodeURIComponent(msg)}`);
   if (!sales || !/^\d{4}-\d{2}-\d{2}$/.test(from)) go('Choose a sales tariff and a start date.');
   const supabase = await createClient();
+  const { data: st } = await supabase.from('sales_tariffs').select('service_code').eq('id', sales).single();
+  if (!st?.service_code) go('That sales tariff has no service set.');
   const { data, error } = await supabase
     .from('customer_tariffs')
-    .upsert({ customer_id: id, sales_tariff_id: sales, effective_from: from }, { onConflict: 'customer_id,effective_from' })
+    .upsert({ customer_id: id, service_code: st!.service_code, sales_tariff_id: sales, effective_from: from }, { onConflict: 'customer_id,service_code,effective_from' })
     .select('customer_id');
   revalidatePath('/stream', 'layout');
   if (error) go(`Not saved: ${error.message}`);

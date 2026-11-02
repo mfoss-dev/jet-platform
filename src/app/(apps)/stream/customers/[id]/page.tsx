@@ -34,16 +34,17 @@ export default async function CustomerDetail({ params, searchParams }: PageProps
   const msg = (await searchParams).msg;
 
   const supabase = await createClient();
-  const [{ data }, { data: jobs }, { data: history }, { data: tariffs }, { data: salesList }] = await Promise.all([
+  const [{ data }, { data: jobs }, { data: history }, { data: tariffs }, { data: salesList }, { data: services }] = await Promise.all([
     supabase.from(SELECTS.customer.table).select(SELECTS.customer.select).eq('id', id).maybeSingle(),
     supabase.from(SELECTS.customerJobs.table).select(SELECTS.customerJobs.select).eq('customer_id', id).order('booked_at', { ascending: false }).limit(10),
     supabase.from(SELECTS.history.table).select(SELECTS.history.select).eq('table_name', 'customers').eq('row_id', id).order('at', { ascending: false }).limit(20),
     supabase.from(SELECTS.customerTariffs.table).select(SELECTS.customerTariffs.select).eq('customer_id', id).order('effective_from', { ascending: false }),
-    supabase.from(SELECTS.salesTariffs.table).select(SELECTS.salesTariffs.select).order('code'),
+    supabase.from(SELECTS.salesTariffs.table).select(SELECTS.salesTariffs.select).order('code').limit(1000),
+    supabase.from(SELECTS.tariffServices.table).select(SELECTS.tariffServices.select),
   ]);
   const today = new Date().toISOString().slice(0, 10);
   const tariffRows = (tariffs ?? []).map((t) => ({ ...t, sales: one(t.sales as { code: string; name: string } | { code: string; name: string }[] | null) }));
-  const currentTariff = tariffRows.find((t) => t.effective_from <= today);
+  const serviceName = (code: string | null) => (services ?? []).find((sv) => sv.code === code)?.name ?? code ?? '—';
   if (!data) notFound();
   const c = { ...(data as unknown as Customer), rep: one((data as unknown as Customer).rep) };
   const canEdit = BILLING_EDITORS.includes(me.role);
@@ -115,25 +116,42 @@ export default async function CustomerDetail({ params, searchParams }: PageProps
       </div>
 
       <div className="card mt">
-        <h3>Rates</h3>
-        <p>
-          Sales tariff: <b>{currentTariff?.sales?.name ?? 'none'}</b>
-          {currentTariff ? <span className="hint"> · since {day(currentTariff.effective_from)} </span> : ' '}
+        <div className="flex between">
+          <h3>Rates</h3>
           <Link className="btn sm" href={{ pathname: '/stream/tariffs', query: { tab: 'price', customer: c.id } }}>Price check</Link>
-        </p>
-        {tariffRows.some((t) => t.effective_from > today) && (
-          <p className="hint">Scheduled: {tariffRows.filter((t) => t.effective_from > today).map((t) => `${t.sales?.name} from ${day(t.effective_from)}`).join(', ')}</p>
-        )}
+        </div>
+        {tariffRows.length ? (
+          <table>
+            <thead><tr><th>Service</th><th>Sales tariff</th><th>From</th><th>To</th><th className="r">Divisor</th><th /></tr></thead>
+            <tbody>
+              {tariffRows.map((t) => {
+                const current = t.effective_from <= today && (!t.effective_to || t.effective_to >= today);
+                return (
+                  <tr key={`${t.service_code}|${t.effective_from}`}>
+                    <td>{serviceName(t.service_code)}</td>
+                    <td><Link href={{ pathname: '/stream/tariffs', query: { tab: 'sales', sales: t.sales_tariff_id } }}>{t.sales?.code}</Link> <span className="hint">{t.sales?.name}</span></td>
+                    <td>{day(t.effective_from)}</td><td>{t.effective_to ? day(t.effective_to) : '—'}</td>
+                    <td className="r">{t.volumetric_divisor ?? <span className="hint">card</span>}</td>
+                    <td>{current ? <span className="pill ok">Current</span> : t.effective_from > today ? <span className="pill warn">Scheduled</span> : <span className="hint">Ended</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : <p className="hint">No sales tariffs yet: this customer can&apos;t be priced until one is set for each service they use.</p>}
         {canEdit && (
-          <form action={assignTariff} className="flex">
+          <form action={assignTariff} className="flex mt8">
             <input type="hidden" name="id" value={c.id} />
-            <select name="sales_tariff_id" className="f" defaultValue={currentTariff?.sales_tariff_id ?? ''} required aria-label="Sales tariff">
+            <select name="sales_tariff_id" className="f" defaultValue="" required aria-label="Sales tariff" style={{ width: 'auto', maxWidth: 360 }}>
               <option value="" disabled>Choose a sales tariff…</option>
-              {(salesList ?? []).map((st) => <option key={st.id} value={st.id}>{st.name} ({st.code})</option>)}
+              {(salesList ?? []).filter((st) => st.branch_code === c.branch_code).map((st) => (
+                <option key={st.id} value={st.id}>{st.code} · {serviceName(st.service_code)}</option>
+              ))}
             </select>
             <label htmlFor="tf" style={{ margin: 0 }}>from</label>
             <input id="tf" type="date" name="effective_from" defaultValue={today} required style={{ width: 160 }} />
             <button className="btn">Set tariff</button>
+            <span className="hint">Applies to that tariff&apos;s service; a later date schedules a change.</span>
           </form>
         )}
       </div>

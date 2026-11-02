@@ -42,9 +42,12 @@ export default async function Tariffs({ searchParams }: PageProps<'/stream/tarif
       </div>
       {msg && <div className={`banner ${/^(Not |No |Choose|Give)|must/.test(msg) ? 'warn' : ''}`} role="status">{msg}</div>}
       {tab === 'fuel' && <FuelTab supabase={supabase} canEdit={canEdit} />}
-      {tab === 'rates' && <RateCards supabase={supabase} canEdit={canEdit} canPublish={canPublish} tariffId={pick(sp.tariff)} versionId={pick(sp.version)} />}
-      {tab === 'sales' && <SalesTariffs supabase={supabase} canEdit={canEdit} salesId={pick(sp.sales)} />}
-      {tab === 'price' && <PriceCheck supabase={supabase} params={{ customer: pick(sp.customer), zone: pick(sp.zone), kind: pick(sp.kind), weight: pick(sp.weight), date: pick(sp.date) }} />}
+      {tab === 'rates' && <RateCards supabase={supabase} canEdit={canEdit} canPublish={canPublish} tariffId={pick(sp.tariff)} versionId={pick(sp.version)} zq={pick(sp.zq)} page={Number(pick(sp.page)) || 0} />}
+      {tab === 'sales' && <SalesTariffs supabase={supabase} canEdit={canEdit} salesId={pick(sp.sales)} q={pick(sp.q)} branch={pick(sp.branch)} service={pick(sp.service)} zq={pick(sp.zq)} page={Number(pick(sp.page)) || 0} />}
+      {tab === 'price' && <PriceCheck supabase={supabase} params={{
+        customer: pick(sp.customer), service: pick(sp.service), ocountry: pick(sp.ocountry), opost: pick(sp.opost), dcountry: pick(sp.dcountry), dpost: pick(sp.dpost),
+        kind: pick(sp.kind), weight: pick(sp.weight), l: pick(sp.l), w: pick(sp.w), h: pick(sp.h), date: pick(sp.date), zone: pick(sp.zone),
+      }} />}
     </>
   );
 }

@@ -27,5 +27,6 @@ export const SELECTS = {
   carriers: { table: 'carriers', select: 'code, name' },
   zones: { table: 'zones', select: 'code, name, sort' },
   margins: { table: 'customer_margins', select: 'zone_code, band, margin_pct, updated_at' },
+  audit: { table: 'audit_log', select: 'id, at, actor_email, table_name, row_id, action, before, after' },
   customerPicker: { table: 'customers', select: 'id, account_code, name' },
 } as const;

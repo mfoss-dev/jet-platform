@@ -32,7 +32,7 @@ export const APPS: Record<AppKey, { name: string; short: string; icon: IconName;
       ['Billing', [{ key: 'run', label: 'Invoice run', icon: 'play' }, { key: 'invoices', label: 'Invoices & credits', icon: 'doc' },
         { key: 'exports', label: 'Accounting exports', icon: 'export' }]],
       ['Customers & pricing', [{ key: 'customers', label: 'Customers', icon: 'users', live: true }, { key: 'tariffs', label: 'Tariffs & fuel', icon: 'fuel', live: true }]],
-      ['Admin', [{ key: 'users', label: 'Users & roles', icon: 'shield' }, { key: 'audit', label: 'Audit log', icon: 'clock' }]],
+      ['Admin', [{ key: 'users', label: 'Users & roles', icon: 'shield' }, { key: 'audit', label: 'Audit log', icon: 'clock', live: true }]],
     ],
   },
   sales: {

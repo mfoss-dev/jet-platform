@@ -67,7 +67,7 @@ export default async function InvoiceRun({ searchParams }: PageProps<'/stream/ru
       {tick && <td><input type="checkbox" name="invoice" value={i.id} aria-label={`Select ${i.bill_to?.name}`} /></td>}
       <td><Link href={`/stream/invoices/${i.id}`}>{i.bill_to?.name}</Link> <span className="hint">{i.bill_to?.account_code}</span></td>
       <td>{i.number ?? <span className="hint">on approval</span>}</td>
-      <td>{i.terms_code ?? '—'} · due {day(i.due_date)}</td>
+      <td>{i.status === 'draft' ? `${i.terms_code ?? 'Customer days'} from approval` : `${i.terms_code ?? '—'} · due ${day(i.due_date)}`}</td>
       <td className="r">{money(i.total)}</td>
       <td><div className="flex">{i.flags.map((f) => <span key={f} className="pill warn">{f}</span>)}</div></td>
     </tr>

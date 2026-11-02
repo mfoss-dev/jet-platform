@@ -1,8 +1,9 @@
 -- Compares the invoice run's rules with the invoices JetStream actually issued (imported history):
 --   grouping  : does each line's bill-to account (our rule) match the account JetStream invoiced?
 --   one each  : did JetStream issue one invoice per account per run, as our run does?
---   due dates : does our terms calculation (from the invoice date) give JetStream's due date? JetStream counts from
---               the day it sent the invoice, so invoices sent later than their date differ by design.
+--   due dates : does our terms calculation give JetStream's due date? Both count from the day the invoice is sent;
+--               weekly invoices dated Sunday are taken as sent on the Thursday after. Accounts whose terms changed
+--               since (only today's terms are known) differ.
 --   totals    : does each invoice's total equal the sum of its lines?
 --   npx supabase db query --linked -f scripts/jetstream-import/validate-invoices.sql
 with js as (
@@ -18,7 +19,7 @@ per_account as (
 dues as (
   select kind, count(*) as invoices,
          count(*) filter (where due_date = case when kind = 'duties' then invoice_date + 7
-                                                else private.due_date(payment_terms_code, invoice_date, payment_terms_days) end) as same_due
+                                                else private.due_date(payment_terms_code, invoice_date + case when extract(isodow from invoice_date) = 7 then 4 else 0 end, payment_terms_days) end) as same_due
     from js where due_date is not null group by kind
 ),
 totals as (

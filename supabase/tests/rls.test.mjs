@@ -327,6 +327,7 @@ const run = async () => {
     assert.equal((await one(`select public.approve_invoices($1) as n`, [run])).n, clean, 'one click approves every clean invoice');
     const nums = (await db.query(`select number from public.invoices where run_id = $1 and status = 'approved' order by number`, [run])).rows.map((r) => Number(r.number));
     assert.deepEqual(nums, nums.map((_, k) => 356500 + k), 'numbers run on from the branch sequence without gaps');
+    assert.equal((await one(`select due_date - current_date as d from public.invoices where run_id = $1 and bill_to_id = $2`, [run, HARBOUR])).d, 14, 'terms count from the day of approval');
     assert.equal((await one(`select status from public.invoice_runs where id = $1`, [run])).status, 'draft', 'flagged invoices still wait');
     await db.query(`select public.release_invoices($1, array[(select id from public.invoices where run_id = $1 and bill_to_id = $2)], true)`, [run, REDFERN]);
     assert.ok(Number((await one(`select count(*) from public.charges where customer_id = $1 and status = 'held'`, [REDFERN])).count) > 0, 'held charges wait for release');
@@ -334,6 +335,8 @@ const run = async () => {
     assert.equal((await one(`select status from public.invoice_runs where id = $1`, [run])).status, 'approved');
     const d = (await one(`select public.prepare_invoice_run('AU', 'duties', '2026-11-02') as id`)).id;
     assert.deepEqual(Object.values(await one(`select terms_code, due_date::text, total::float from public.invoices where run_id = $1`, [d])), ['7D', '2026-11-09', 88.4], 'duties: own invoice, 7 days');
+    await db.query(`select public.approve_invoices($1)`, [d]);
+    assert.equal((await one(`select due_date - current_date as d from public.invoices where run_id = $1`, [d])).d, 7);
   });
   await as(priya, 'priya@harbouroptics.example', async () => {
     assert.equal(Number((await one('select count(*) from public.invoices')).count), 0, 'customers see no draft invoices');

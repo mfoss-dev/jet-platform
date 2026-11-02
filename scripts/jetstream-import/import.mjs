@@ -206,7 +206,7 @@ if (dryRun) process.exit(0);
 console.log('Loading into the linked Supabase project…');
 for (const f of readdirSync(out).filter((n) => n.endsWith('.sql')).sort()) {
   process.stdout.write(`  ${f} … `);
-  const res = execFileSync('npx', ['supabase', 'db', 'query', '--linked', '-f', join(out, f), '--output-format', 'json'],
+  const res = execFileSync('npx', ['supabase', 'db', 'query', '--linked', '-f', `scripts/jetstream-import/out/${f}`, '--output-format', 'json'],
     { cwd: root, encoding: 'utf8', shell: true, maxBuffer: 1 << 26 });
   if (/"error"|ERROR/i.test(res)) { console.log('failed'); console.log(res.slice(0, 2000)); process.exit(1); }
   console.log('ok');

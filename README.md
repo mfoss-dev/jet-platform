@@ -45,6 +45,26 @@ Migrations apply to Test automatically on every push to `main` (Supabase's GitHu
 npx supabase db push --linked --include-seed
 ```
 
+### Importing Jet's tariffs from JetStream
+
+Jet's rate cards, zone guides, sales tariffs, margins, customers (business details only) and customer tariff
+assignments come from a restored JetStream SQL Server database:
+
+```bash
+node scripts/jetstream-import/import.mjs --dry-run   # export and write SQL to scripts/jetstream-import/out/ only
+node scripts/jetstream-import/import.mjs             # also load into the linked project (Test)
+node scripts/jetstream-import/validate.mjs           # re-price JetStream's 2026 jobs and compare with its freight lines
+```
+
+- Needs SQL Server 2025 (the backup was made with it) with the JetStream database restored, `sqlcmd`, and `npx supabase link`.
+- Repeatable: each run replaces what the previous run imported. It never touches jobs, and never brings across contacts, emails, phone numbers or addresses.
+- `out/` holds real customer and tariff data and is git-ignored. Don't put customer names in code or comments.
+- Last run (Nov 2026, "JetStreamSeeded" backup of 13 Oct): 18 rate cards, 23,576 rates, 15 zone guides, 320 sales tariffs,
+  115,419 margins, 1,693 customers, 3,305 assignments. Validation: 547 of 560 automatically rated 2026 jobs priced to the
+  cent; 13 had no sales tariff in force on their ship date; none differed.
+- JetStream's billed charge is freight plus add-ons (fuel, security, surcharges from its SalesAddOn table). Only freight
+  is reproduced so far; add-ons are a separate piece of work.
+
 ### Access rules (row-level security)
 
 - **Staff** (owner, management, finance, customer service, admin) see every customer and job, including cost and margin.

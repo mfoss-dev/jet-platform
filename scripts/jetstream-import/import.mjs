@@ -193,8 +193,8 @@ chunked('09-margins', marginRows, 3000, (rows) => `insert into public.sales_marg
 chunked('10-customer-tariffs', ctRows, 2000, (rows) => `insert into public.customer_tariffs (customer_id, service_code, effective_from, effective_to, sales_tariff_id, volumetric_divisor, created_by) values\n${rows.map((r) => `(${[r.customer, r.service, r.from, r.to, r.sid, r.divisor].map(lit).join(', ')}, null)`).join(',\n')};`);
 write('11-log', `select private.log_change('import', 'jetstream', jsonb_build_object('rate_cards', ${cards.length}, 'rates', ${rateRows.length}, 'sales_tariffs', ${sales.length}, 'margins', ${marginRows.length}, 'customers', ${custRows.length}, 'customer_tariffs', ${ctRows.length}, 'source', 'JetStreamSeeded backup', 'run', ${lit(TODAY)}));`);
 
-rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
+for (const old of readdirSync(out).filter((n) => n.endsWith('.sql'))) rmSync(join(out, old));   // keep the folder (it may be open elsewhere)
 for (const f of files) writeFileSync(join(out, `${f.name}.sql`), f.sql);
 console.log(`Wrote ${files.length} SQL files to ${out}`);
 console.log(`  ${cards.length} rate cards, ${rateRows.length} rates, ${zoneSets.length} zone guides (${groupRows.length} groups, ${laneRows.length} lanes),`);

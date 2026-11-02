@@ -18,12 +18,16 @@ const from = process.argv.includes('--from') ? process.argv[process.argv.indexOf
 const SERVICES = ['INTOUTEXP', 'INTINBEXP', 'DOMESTEXP', 'DOMESTROAD', 'DOMESTASAP'];
 
 const raw = execFileSync(SQLCMD, ['-S', SERVER, '-E', '-C', '-d', 'JetStream', '-h', '-1', '-y', '0', '-Q',
-  `set nocount on; select ConnoteNo, CustomerCode, ServiceCode, ShipmentDate, ConsignmentType, SenderCountryCode, SenderPostcode,
-   ReceiverCountryCode, ReceiverPostcode, Weight, Charge, WeightType from Billing
-   where HandRated = 'N' and ShipmentDate >= '${from}' and ServiceCode in (${SERVICES.map((s) => `'${s}'`).join(',')}) for json path`],
+  // Billing.Charge is freight plus add-ons (fuel, security, surcharges); the freight alone is the ".FREIGHT"
+  // transaction line, so that is what the new freight price is compared with.
+  `set nocount on; select b.ConnoteNo, b.CustomerCode, b.ServiceCode, b.ShipmentDate, b.ConsignmentType, b.SenderCountryCode, b.SenderPostcode,
+   b.ReceiverCountryCode, b.ReceiverPostcode, b.Weight, f.Freight as Charge, b.WeightType from Billing b
+   join (select ConnoteNo, sum(Charge) Freight from (select ConnoteNo, Charge, TransactionType from Transactions union all
+         select ConnoteNo, Charge, TransactionType from arcTransactions) t where TransactionType = '.FREIGHT' group by ConnoteNo) f on f.ConnoteNo = b.ConnoteNo
+   where b.HandRated = 'N' and b.ShipmentDate >= '${from}' and b.ServiceCode in (${SERVICES.map((s) => `'${s}'`).join(',')}) for json path`],
   { maxBuffer: 1 << 28, encoding: 'utf8' });
 const jobs = JSON.parse(raw.replace(/\r?\n/g, '').trim() || '[]');
-console.log(`${jobs.length} automatically rated jobs since ${from}`);
+console.log(`${jobs.length} automatically rated jobs since ${from} with a freight line`);
 if (!jobs.length) process.exit(0);
 
 const t = (s) => (s ?? '').toString().trim();

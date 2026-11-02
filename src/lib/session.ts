@@ -22,7 +22,8 @@ export const getMe = cache(async (): Promise<Me> => {
 
   const { data: p, error } = await supabase
     .from('profiles')
-    .select('email, full_name, role, active, customer:customers(name, account_code)')
+    // Named foreign key: customers also links to profiles through rep_id, so "customers" alone is ambiguous.
+    .select('email, full_name, role, active, customer:customers!profiles_customer_id_fkey(name, account_code)')
     .eq('id', id)
     .maybeSingle();
   // A failed read must not quietly turn staff into customers. No row at all (uninvited) still means no access.

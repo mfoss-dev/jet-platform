@@ -34,6 +34,7 @@ Sign-in is by emailed link. In the Supabase dashboard, **Authentication → URL 
 
 - `supabase/migrations/`: every schema change, in order. Never edit the database by hand; add a migration.
 - `supabase/seed.sql`: demo data for local and Test only.
+- **Every new table needs explicit `GRANT`s** in its migration (see `20261102000400_table_privileges.sql`). The hosted project doesn't grant new tables to the API roles automatically, and the tests mirror that, so a missing grant fails `npm run test:db`.
 - `npm run test:db`: runs all migrations and the seed in an in-memory Postgres (PGlite), then checks the access rules as management, a sales rep, a customer, an uninvited sign-in and a signed-out visitor.
 
 Apply migrations to the Test project (after `npx supabase login` and `npx supabase link --project-ref kyfqdevrvihtjfugmzrx`):

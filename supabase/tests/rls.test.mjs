@@ -15,7 +15,7 @@ const db = new PGlite();
 await db.exec(`
   create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
   grant usage on schema public to anon, authenticated, service_role;
-  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+  -- No default table grants: like the hosted project, every table needs an explicit GRANT in a migration.
   create schema auth; grant usage on schema auth to anon, authenticated, service_role;
   create table auth.users (id uuid primary key default gen_random_uuid(), email text, raw_user_meta_data jsonb default '{}');
   create function auth.jwt() returns jsonb language sql stable as $$

@@ -39,5 +39,6 @@ export const SELECTS = {
   audit: { table: 'audit_log', select: 'id, at, actor_email, table_name, row_id, action, before, after' },
   salesUsage: { table: 'sales_tariff_usage', select: 'sales_tariff_id, customers' },
   salesCustomers: { table: 'customer_tariffs', select: 'effective_from, effective_to, customer:customers(id, name, account_code)' },
+  salesReview: { table: 'sales_tariff_review', select: 'id, code, name, branch_code, service_code, is_standard, base_tariff_id, rate_card, customers, cells, min_margin, avg_margin, max_margin, distinct_margins, jobs_12m, freight_12m' },
   customerPicker: { table: 'customers', select: 'id, account_code, name' },
 } as const;

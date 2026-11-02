@@ -225,3 +225,32 @@ export async function createSalesTariff(formData: FormData) {
   revalidatePath('/stream/tariffs');
   back(`tab=sales&sales=${data!.id}`, `Sales tariff ${code} created · logged`);
 }
+
+// ---------------------------------------------------------------- standardising pricing
+
+// Move the ticked customers from one sales tariff to another from a start date; earlier jobs keep their price.
+export async function moveCustomers(formData: FormData) {
+  const from = String(formData.get('from') ?? '');
+  const to = String(formData.get('to') ?? '');
+  const start = String(formData.get('start') ?? '');
+  const customers = formData.getAll('customer').map(String).filter(Boolean);
+  const q = `tab=standardise&from=${from}&to=${to}`;
+  if (!customers.length) back(q, 'Choose at least one customer to move.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) back(q, 'Choose the date the new prices start.');
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc('move_customers_to_tariff', { p_from: from, p_to: to, p_customers: customers, p_date: start });
+  revalidatePath('/stream/tariffs');
+  if (error) back(q, `Not moved: ${error.message}`);
+  back(`tab=standardise&from=${from}&to=${to}`, `${data} customer${data === 1 ? '' : 's'} moved from ${start} · logged`);
+}
+
+export async function setStandard(formData: FormData) {
+  const id = String(formData.get('id') ?? '');
+  const on = formData.get('standard') !== 'off';
+  const ret = String(formData.get('return') ?? 'tab=standardise');
+  const supabase = await createClient();
+  const { error } = await supabase.rpc('set_standard_tariff', { p_sales: id, p_standard: on });
+  revalidatePath('/stream/tariffs');
+  if (error) back(ret, `Not saved: ${error.message}`);
+  back(ret, on ? 'Standard tariff set · logged' : 'No longer the standard tariff · logged');
+}

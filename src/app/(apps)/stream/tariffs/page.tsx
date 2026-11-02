@@ -8,11 +8,11 @@ import { FuelTab } from './FuelTab';
 import { PriceCheck } from './PriceCheck';
 import { RateCards } from './RateCards';
 import { SalesTariffs } from './SalesTariffs';
+import { Standardise } from './Standardise';
 
-const TABS = [['fuel', 'Fuel surcharge'], ['addons', 'Add-ons'], ['rates', 'Rate cards'], ['sales', 'Sales tariffs'], ['price', 'Price check']] as const;
+const TABS = [['fuel', 'Fuel surcharge'], ['addons', 'Add-ons'], ['rates', 'Rate cards'], ['sales', 'Sales tariffs'], ['standardise', 'Standardise pricing'], ['price', 'Price check']] as const;
 
 const pick = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? '';
-
 
 export default async function Tariffs({ searchParams }: PageProps<'/stream/tariffs'>) {
   const me = await getMe();
@@ -39,6 +39,7 @@ export default async function Tariffs({ searchParams }: PageProps<'/stream/tarif
       {tab === 'addons' && <AddOns supabase={supabase} canEdit={canEdit} addonId={pick(sp.addon)} q={pick(sp.q)} branch={pick(sp.branch)} service={pick(sp.service)} who={pick(sp.who)} when={pick(sp.when)} />}
       {tab === 'rates' && <RateCards supabase={supabase} canEdit={canEdit} canPublish={canPublish} tariffId={pick(sp.tariff)} versionId={pick(sp.version)} zq={pick(sp.zq)} page={Number(pick(sp.page)) || 0} />}
       {tab === 'sales' && <SalesTariffs supabase={supabase} canEdit={canEdit} salesId={pick(sp.sales)} q={pick(sp.q)} branch={pick(sp.branch)} service={pick(sp.service)} zq={pick(sp.zq)} page={Number(pick(sp.page)) || 0} />}
+      {tab === 'standardise' && <Standardise supabase={supabase} canEdit={canEdit} branch={pick(sp.branch)} service={pick(sp.service)} show={pick(sp.show)} from={pick(sp.from)} to={pick(sp.to)} />}
       {tab === 'price' && <PriceCheck supabase={supabase} params={{
         customer: pick(sp.customer), service: pick(sp.service), ocountry: pick(sp.ocountry), opost: pick(sp.opost), dcountry: pick(sp.dcountry), dpost: pick(sp.dpost),
         kind: pick(sp.kind), weight: pick(sp.weight), l: pick(sp.l), w: pick(sp.w), h: pick(sp.h), date: pick(sp.date), zone: pick(sp.zone),

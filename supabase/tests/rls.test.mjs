@@ -265,6 +265,38 @@ const run = async () => {
     });
   }
   results.push('  ✓ add-ons follow JetStream: freight line, fuel/security/GST, % / per-kg / per-piece rules, postcode conditions, weekly and customer fuel rates');
+
+  // ---- pricing review: outliers, what a move would cost each customer, moving from a date
+  const STANDARD = '7c000000-0000-4000-8000-000000000001';
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    const review = Object.fromEntries((await db.query(`select code, is_standard, customers, jobs_12m, min_margin::float, max_margin::float from public.sales_tariff_review`)).rows.map((r) => [r.code, r]));
+    assert.equal(review.STANDARD.is_standard, true);
+    assert.equal(review.KEY.customers, 2);
+    assert.equal(review.KEY.jobs_12m, 80, "Key accounts' last 12 months of jobs");
+    assert.deepEqual([review.KEY.min_margin, review.KEY.max_margin], [25, 30]);
+    const p = await one(`select * from public.tariff_switch_preview($1, $2) where customer_id = $3`, [KEY, STANDARD, HARBOUR]);
+    assert.equal(p.jobs, 40);
+    assert.equal(Number(p.current_price), Number(p.billed), "today's price on their own tariff matches what was billed");
+    const rise = Number(p.new_price) / Number(p.current_price);
+    assert.ok(rise > 1.05 && rise < 1.08, `Standard is 8 points dearer (got ${rise})`);
+    await db.exec('savepoint past');
+    await assert.rejects(db.query(`select public.move_customers_to_tariff($1, $2, $3, current_date - 1)`, [KEY, STANDARD, [HARBOUR]]), /today or later/);
+    await db.exec('rollback to savepoint past');
+    assert.equal((await one(`select public.move_customers_to_tariff($1, $2, $3, current_date + 7) as n`, [KEY, STANDARD, [HARBOUR]])).n, 1);
+    const on = async (d) => (await one(`select sales_tariff from public.price_shipment($1, 'INTOUTEXP', 'AU', '2000', 'GB', '', 'parcel', 3.2, current_date + $2::int)`, [HARBOUR, d])).sales_tariff;
+    assert.deepEqual([await on(6), await on(7)], ['KEY', 'STANDARD'], 'jobs before the start date keep the old tariff');
+    assert.equal(Number((await one(`select count(*) from public.audit_log where table_name = 'customer_tariffs' and after ->> 'moved_to' = 'STANDARD'`)).count), 1);
+    await db.query(`select public.set_standard_tariff($1)`, [KEY]);
+    assert.deepEqual((await db.query(`select code from public.sales_tariffs where is_standard`)).rows.map((r) => r.code), ['KEY'], 'one standard per branch and service');
+  });
+  await as(sam, 'sam@jetworldwide.example', async () => {
+    await assert.rejects(db.query(`select public.move_customers_to_tariff($1, $2, $3, current_date + 7)`, [KEY, STANDARD, [HARBOUR]]), /Only finance/);
+  });
+  await as(priya, 'priya@harbouroptics.example', async () => {
+    assert.equal(Number((await one('select count(*) from public.billed_shipments')).count), 0, 'customers never see the shipment history');
+    assert.equal(Number((await one('select count(*) from public.sales_tariff_review')).count), 0);
+  });
+  results.push('  ✓ pricing review: tariff outliers, like-for-like preview of a move on real jobs, moves start on a date and are logged, one standard per service');
 };
 
 try {

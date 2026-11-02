@@ -117,6 +117,22 @@ from public.customers c
 where c.branch_code = 'AU'
 on conflict do nothing;
 
+update public.sales_tariffs set is_standard = true where id = '7c000000-0000-4000-8000-000000000001' and not is_standard;
+
+-- Demo shipment history for the pricing review: 40 jobs per Sydney customer through 2026, billed on their tariff.
+insert into public.billed_shipments (connote, customer_id, branch_code, service_code, shipped_on, kind, orig_country, orig_postcode,
+  dest_country, dest_postcode, weight, freight, source)
+select 'DEMO' || c.account_code || lpad(n::text, 2, '0'), c.id, 'AU', 'INTOUTEXP', date '2026-01-05' + n * 7,
+       case when n % 5 = 0 then 'doc' else 'parcel' end, 'AU', '2000', d.country, '',
+       w.kg, public.freight_charge('7b000000-0000-4000-8000-000000000001', ct.sales_tariff_id, d.zone, case when n % 5 = 0 then 'doc' else 'parcel' end, w.kg), 'demo'
+from public.customers c
+join public.customer_tariffs ct on ct.customer_id = c.id and ct.service_code = 'INTOUTEXP'
+cross join generate_series(0, 39) n
+join (values (0, 'NZ', '1'), (1, 'SG', '2'), (2, 'GB', '6'), (3, 'US', '7')) as d (i, country, zone) on d.i = (n + length(c.name)) % 4
+join (values (0, 0.5), (1, 1.2), (2, 3.2), (3, 7.5), (4, 18.0), (5, 42.0)) as w (i, kg) on w.i = (n * 7 + length(c.name)) % 6
+where c.branch_code = 'AU'
+on conflict (connote) do nothing;
+
 -- Week 44 exceptions: the seven rows on the billing feed's "Needs attention" view.
 insert into public.jobs (connote, customer_id, branch_code, carrier_code, service_id, booked_at, origin_city, origin_country, dest_city, dest_country,
                          declared_weight_kg, carrier_weight_kg, sell_ex_gst, cost_ex_gst, status, billing_status, issue, issue_note) values

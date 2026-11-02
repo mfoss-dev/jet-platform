@@ -52,7 +52,15 @@ const fuelLines = q(`select b.BranchCode, b.CustomerCode, b.ServiceCode, b.Shipm
   join (select ConnoteNo, BranchCode, CustomerCode, ServiceCode, ShipmentDate, HandRated from arcBilling union all
         select ConnoteNo, BranchCode, CustomerCode, ServiceCode, ShipmentDate, HandRated from Billing) b on b.ConnoteNo = t.ConnoteNo
   where t.TransactionType = '.FREIGHT' and t.Charge > 0 and b.HandRated = 'N' and b.ShipmentDate >= '20260101'`);
+// Automatically rated jobs billed this year with their freight line: the pricing review re-prices them on other tariffs.
+const shipments = q(`select b.ConnoteNo, b.BranchCode, b.CustomerCode, b.ServiceCode, b.ShipmentDate, b.ConsignmentType, b.SenderCountryCode,
+  b.SenderPostcode, b.ReceiverCountryCode, b.ReceiverPostcode, b.Weight, f.Freight
+  from (select * from arcBilling union all select * from Billing) b
+  join (select ConnoteNo, cast(sum(Charge) as decimal(12,2)) Freight from (select ConnoteNo, Charge, TransactionType from Transactions union all
+        select ConnoteNo, Charge, TransactionType from arcTransactions) t where TransactionType = '.FREIGHT' group by ConnoteNo) f on f.ConnoteNo = b.ConnoteNo
+  where b.HandRated = 'N' and b.ShipmentDate >= '20260101'`);
 console.log(`  ${addOns.length} add-on rules, ${fuelLines.length} billed freight lines for fuel`);
+console.log(`  ${shipments.length} billed shipments for the pricing review`);
 console.log(`  ${rates.length} rates, ${margins.length} margins, ${groups.length} zone groups, ${lanes.length} zone lanes, ${customers.length} customers, ${custTariffs.length} customer tariffs`);
 
 // ---------------------------------------------------------------- transform
@@ -231,6 +239,12 @@ for (const s of new Set(fuelRows.map((f) => f.service))) if (!serviceCodes.has(s
 if (ctSkipped) report.push(`${ctSkipped} customer tariff rows skipped (customer, sales tariff or date missing)`);
 
 // ---------------------------------------------------------------- SQL
+const shipRows = [...new Map(shipments.filter((b) => BRANCH[t(b.BranchCode)] && custId.has(t(b.CustomerCode)) && Number(b.Weight) > 0).map((b) => [t(b.ConnoteNo), {
+  connote: t(b.ConnoteNo), customer: custId.get(t(b.CustomerCode)), branch: BRANCH[t(b.BranchCode)], service: t(b.ServiceCode), shipped: date(b.ShipmentDate),
+  kind: KIND(b.ConsignmentType), oc: t(b.SenderCountryCode), op: t(b.SenderPostcode), dc: t(b.ReceiverCountryCode), dp: t(b.ReceiverPostcode),
+  weight: Number(b.Weight), freight: Number(b.Freight),
+}])).values()].filter((r) => r.shipped);
+
 const lit = (v) => (v == null ? 'null' : typeof v === 'number' ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
 const files = [];
 const header = "set jet.importing = 'on';\n";
@@ -249,6 +263,7 @@ delete from public.base_tariffs where name like '%(demo)' or id in (${allTariffI
 delete from public.zone_sets where code like 'DEMO-%' or id in (${allZoneIds.map(lit).join(', ') || 'null'});
 insert into public.carriers (code, name) values ('JET', 'Jet Worldwide (own network)') on conflict (code) do nothing;
 delete from public.addon_rules where source in ('jetstream', 'reconstructed') or id::text like '7e000000-%';
+delete from public.billed_shipments where source in ('jetstream', 'demo');
 insert into public.tariff_services (code, name) values
 ${serviceRows.map((r) => `(${lit(r.code)}, ${lit(r.name)})`).join(',\n')}
 on conflict (code) do nothing;
@@ -278,7 +293,9 @@ chunked('09-margins', marginRows, 3000, (rows) => `insert into public.sales_marg
 chunked('10-customer-tariffs', ctRows, 2000, (rows) => `insert into public.customer_tariffs (customer_id, service_code, effective_from, effective_to, sales_tariff_id, volumetric_divisor, created_by) values\n${rows.map((r) => `(${[r.customer, r.service, r.from, r.to, r.sid, r.divisor].map(lit).join(', ')}, null)`).join(',\n')};`);
 chunked('12-addons', addonUnique, 1500, (rows) => `insert into public.addon_rules (id, branch_code, customer_id, service_code, code, description, valid_from, valid_to, apply_when, percentage_of, percentage, fixed_fee, minimum, range_from, range_to, add_fuel, add_security, add_gst, income_account, source) values\n${rows.map((r) => `(${[r.id, r.branch_code, r.customer, r.service, r.code, r.description, r.valid_from, r.valid_to, r.apply_when, r.percentage_of, r.percentage, r.fixed_fee, r.minimum, r.range_from, r.range_to].map(lit).join(', ')}, ${r.add_fuel}, ${r.add_security}, ${r.add_gst}, ${lit(r.income_account)}, 'jetstream')`).join(',\n')};`);
 chunked('13-fuel', fuelRows, 1500, (rows) => `insert into public.addon_rules (id, branch_code, customer_id, service_code, code, description, valid_from, valid_to, apply_when, percentage, add_gst, source) values\n${rows.map((r) => `(${[r.id, r.branch_code, r.customer, r.service, '#FUEL', 'Fuel surcharge (reconstructed from billed jobs)', r.week, sunday(r.week), 'ADD=Y', r.pct].map(lit).join(', ')}, true, 'reconstructed')`).join(',\n')};`);
-write('99-log', `select private.log_change('import', 'jetstream', jsonb_build_object('rate_cards', ${cards.length}, 'rates', ${rateRows.length}, 'sales_tariffs', ${sales.length}, 'margins', ${marginRows.length}, 'customers', ${custRows.length}, 'customer_tariffs', ${ctRows.length}, 'addon_rules', ${addonUnique.length}, 'fuel_weeks', ${fuelRows.length}, 'source', 'JetStreamSeeded backup', 'run', ${lit(TODAY)}));`);
+chunked('14-shipments', shipRows, 2000, (rows) => `insert into public.billed_shipments (connote, customer_id, branch_code, service_code, shipped_on, kind, orig_country, orig_postcode, dest_country, dest_postcode, weight, freight) values
+${values(rows, ['connote', 'customer', 'branch', 'service', 'shipped', 'kind', 'oc', 'op', 'dc', 'dp', 'weight', 'freight'])};`);
+write('99-log', `select private.log_change('import', 'jetstream', jsonb_build_object('rate_cards', ${cards.length}, 'rates', ${rateRows.length}, 'sales_tariffs', ${sales.length}, 'margins', ${marginRows.length}, 'customers', ${custRows.length}, 'customer_tariffs', ${ctRows.length}, 'addon_rules', ${addonUnique.length}, 'fuel_weeks', ${fuelRows.length}, 'billed_shipments', ${shipRows.length}, 'source', 'JetStreamSeeded backup', 'run', ${lit(TODAY)}));`);
 
 mkdirSync(out, { recursive: true });
 for (const old of readdirSync(out).filter((n) => n.endsWith('.sql'))) rmSync(join(out, old));   // keep the folder (it may be open elsewhere)
@@ -286,6 +303,7 @@ for (const f of files) writeFileSync(join(out, `${f.name}.sql`), f.sql);
 console.log(`Wrote ${files.length} SQL files to ${out}`);
 console.log(`  ${cards.length} rate cards, ${rateRows.length} rates, ${zoneSets.length} zone guides (${groupRows.length} groups, ${laneRows.length} lanes),`);
 console.log(`  ${sales.length} sales tariffs, ${marginRows.length} margins, ${custRows.length} customers, ${ctRows.length} customer tariffs`);
+console.log(`  ${shipRows.length} billed shipments`);
 console.log(`  ${addonUnique.length} add-on rules, ${fuelRows.length} reconstructed weekly fuel rates (${fuelRows.filter((f) => f.customer).length} customer-specific), ${serviceRows.length} services`);
 for (const r of report) console.log(`  note: ${r}`);
 if (dryRun) process.exit(0);

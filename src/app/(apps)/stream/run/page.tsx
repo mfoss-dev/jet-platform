@@ -11,7 +11,7 @@ type Run = {
   created_at: string; approved_at: string | null; invoices: number; drafts: number; flagged: number; total: number; first_number: number | null; last_number: number | null;
 };
 type Inv = { id: string; number: number | null; kind: string; invoice_date: string; due_date: string | null; terms_code: string | null; total: number; status: string; flags: string[]; bill_to: { id: string; name: string; account_code: string } | null };
-type Unbilled = { branch_code: string; kind: string; status: string; lines: number; shipments: number; total: number; oldest: string };
+type Unbilled = { branch_code: string; kind: string; status: string; lines: number; shipments: number; total: number; oldest: string; ready: boolean };
 type Held = { id: string; branch_code: string; connote: string; shipped_on: string; code: string; description: string; charge: number; fuel: number; security: number; gst: number; status: string; customer: { name: string; account_code: string } | null };
 
 const BRANCH: Record<string, string> = { AU: 'Sydney', NZ: 'Auckland' };
@@ -61,6 +61,12 @@ export default async function InvoiceRun({ searchParams }: PageProps<'/stream/ru
     held = ((data ?? []) as unknown as Held[]).map((h) => ({ ...h, customer: one(h.customer) }));
   }
   const heldCount = unbilled.filter((u) => u.status !== 'new').reduce((a, u) => a + u.lines, 0);
+  const notReady = unbilled.filter((u) => u.status === 'new' && !u.ready).reduce((a, u) => a + u.shipments, 0);
+  let unpriced: Held[] = [];
+  if (showHeld && notReady) {
+    const { data } = await supabase.from(SELECTS.unpriced.table).select(SELECTS.unpriced.select).eq('status', 'new').is('invoice_id', null).gte('charge', 999000).limit(200);
+    unpriced = ((data ?? []) as unknown as Held[]).map((h) => ({ ...h, customer: one(h.customer) }));
+  }
 
   const invRow = (i: Inv, tick: boolean) => (
     <tr key={i.id}>
@@ -82,7 +88,7 @@ export default async function InvoiceRun({ searchParams }: PageProps<'/stream/ru
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
         {['AU', 'NZ'].flatMap((b) => ['weekly', 'duties'].map((k) => {
-          const u = unbilled.find((x) => x.branch_code === b && x.kind === (k === 'duties' ? 'duties' : 'freight') && x.status === 'new');
+          const u = unbilled.find((x) => x.branch_code === b && x.kind === (k === 'duties' ? 'duties' : 'freight') && x.status === 'new' && x.ready);
           return (
             <div className="card" key={`${b}${k}`}>
               <div className="hint">{BRANCH[b]} · {k === 'duties' ? 'customs duties' : 'freight'} not yet invoiced</div>
@@ -92,8 +98,23 @@ export default async function InvoiceRun({ searchParams }: PageProps<'/stream/ru
           );
         }))}
       </div>
-      {heldCount > 0 && (
-        <div className="banner mt">{heldCount} charge lines are held or marked do-not-bill. <Link href="/stream/run?held=1">Review held charges</Link></div>
+      {(heldCount > 0 || notReady > 0) && (
+        <div className="banner mt">
+          {notReady > 0 && <>{notReady} shipment{notReady === 1 ? ' isn’t' : 's aren’t'} priced (JetStream&apos;s rating-error placeholder or a zero total) and stay out of runs until fixed. </>}
+          {heldCount > 0 && <>{heldCount} charge lines are held or marked do-not-bill. </>}
+          <Link href="/stream/run?held=1">Review</Link>
+        </div>
+      )}
+
+      {showHeld && unpriced.length > 0 && (
+        <div className="card mt">
+          <h3>Not priced</h3>
+          <p className="hint">These carry JetStream&apos;s 999,999 rating-error placeholder. Price them (or mark do-not-bill) before they can be invoiced.</p>
+          <table className="mt8">
+            <thead><tr><th>Account</th><th>Shipment</th><th>Shipped</th><th>Line</th></tr></thead>
+            <tbody>{unpriced.map((h) => <tr key={h.id}><td>{h.customer?.name} <span className="hint">{h.customer?.account_code}</span></td><td>{h.connote}</td><td>{day(h.shipped_on)}</td><td>{h.description || h.code}</td></tr>)}</tbody>
+          </table>
+        </div>
       )}
 
       {showHeld && (

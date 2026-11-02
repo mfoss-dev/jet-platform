@@ -311,13 +311,15 @@ const run = async () => {
     await assert.rejects(db.query(`select private.build_invoice_run('AU', 'weekly', '2026-11-01', '2026-11-01', false)`), /permission denied/);
   });
   await as(chris, 'chris@jetworldwide.example', async () => {
+    await db.query(`insert into public.charges (branch_code, customer_id, connote, shipped_on, code, charge) values ('AU', $1, 'UNPRICED1', '2026-10-30', '.FREIGHT', 999999)`, [HARBOUR]);
     const run = (await one(`select public.prepare_invoice_run('AU', 'weekly', '2026-11-01') as id`)).id;
+    assert.equal((await one(`select invoice_id from public.charges where connote = 'UNPRICED1'`)).invoice_id, null, "JetStream's unpriced placeholder never reaches an invoice");
     const invs = Object.fromEntries((await db.query(`select bill_to_id, flags, total::float, due_date::text, number from public.invoices where run_id = $1`, [run])).rows.map((r) => [r.bill_to_id, r]));
     assert.equal(invs[CYCLES], undefined, "Coastal Cycles' charges go on Coastal Pharma's invoice");
     assert.deepEqual(invs[PHARMA].flags, ['Has manual charges']);
     assert.ok(invs[REDFERN].flags.includes('Account on hold'));
     assert.equal(invs[HARBOUR].due_date, '2026-11-15', 'Harbour Optics: 14 days');
-    const unbilled = Number((await one(`select count(*) from public.charges where branch_code = 'AU' and kind = 'freight' and invoice_id is null and status = 'new' and shipped_on <= '2026-11-01'`)).count);
+    const unbilled = Number((await one(`select count(*) from public.charges where branch_code = 'AU' and kind = 'freight' and invoice_id is null and status = 'new' and shipped_on <= '2026-11-01' and connote <> 'UNPRICED1'`)).count);
     assert.equal(unbilled, 0, 'every freight charge to the period end is on an invoice');
     assert.equal(Number((await one(`select count(*) from public.charges where kind = 'duties' and invoice_id is not null`)).count), 0, 'duties are not in the weekly run');
     await db.exec('savepoint s2');

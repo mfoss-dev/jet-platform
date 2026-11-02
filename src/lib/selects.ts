@@ -46,6 +46,8 @@ export const SELECTS = {
   invoice: { table: 'invoices', select: 'id, run_id, branch_code, number, kind, invoice_date, due_date, terms_code, charge_total, fuel_total, security_total, gst_total, total, status, flags, sent_at, exported_at, source, credit_for, reason, approved_at, bill_to:customers!invoices_bill_to_id_fkey(id, name, account_code, invoice_recipients), rebill_to:customers!invoices_rebill_to_id_fkey(name, account_code)' },
   credits: { table: 'invoices', select: 'id, number, status, invoice_date, total, reason' },
   creditedLines: { table: 'charges', select: 'credit_of, charge, fuel, security, gst' },
+  creditQueue: { table: 'credit_note_queue', select: 'id, needs_management, credit_approval_limit, i_can_approve, raised_by' },
+  creditLimits: { table: 'branches', select: 'code, name, currency, credit_approval_limit' },
   invoiceLines: { table: 'charges', select: 'id, connote, shipped_on, service_code, kind, code, description, charge, fuel, security, gst, income_account, pieces, weight, orig_country, dest_country, invoice_id, customer:customers!charges_customer_id_fkey(name, account_code)' },
   unpriced: { table: 'charges', select: 'id, branch_code, connote, shipped_on, code, description, charge, status, customer:customers!charges_customer_id_fkey(name, account_code)' },
   heldCharges: { table: 'charges', select: 'id, branch_code, connote, shipped_on, code, description, charge, fuel, security, gst, status, customer:customers!charges_customer_id_fkey(name, account_code)' },

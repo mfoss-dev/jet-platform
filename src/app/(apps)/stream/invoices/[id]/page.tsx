@@ -46,6 +46,9 @@ export default async function InvoiceView({ params, searchParams }: PageProps<'/
   const inv = { ...raw, bill_to: one(raw.bill_to), rebill_to: one(raw.rebill_to), original: original as { id: string; number: number | null } | null };
   const isCredit = inv.kind === 'credit';
   const credits = (creditData ?? []) as unknown as Credit[];
+  const { data: queue } = isCredit && inv.status === 'draft'
+    ? await supabase.from(SELECTS.creditQueue.table).select(SELECTS.creditQueue.select).eq('id', id).maybeSingle()
+    : { data: null };
   const creditedTotal = credits.reduce((a, c) => a + Number(c.total), 0);
   const lines = ((lineData ?? []) as unknown as Line[]).map((l) => ({
     ...l, customer: one(l.customer), charge: Number(l.charge), fuel: Number(l.fuel), security: Number(l.security), gst: Number(l.gst),
@@ -90,9 +93,16 @@ export default async function InvoiceView({ params, searchParams }: PageProps<'/
         <div className="card noprint">
           <b>Draft credit note.</b> {inv.reason}
           {inv.rebill_to && <> · on approval the credited lines are re-billed to <b>{inv.rebill_to.name}</b> {inv.rebill_to.account_code} in the next run</>}
+          <div className="hint mt8">
+            Raised by {queue?.raised_by ?? 'someone'} · {queue?.needs_management
+              ? `over the ${money(queue.credit_approval_limit)} limit, so management approves (not the person who raised it)`
+              : `within the ${money(queue?.credit_approval_limit ?? 0)} limit, so finance can approve it`}
+          </div>
           {canEdit && (
             <div className="flex mt8">
-              <form action={approveCredit}><input type="hidden" name="id" value={id} /><button className="btn primary">Approve credit note ({money(inv.total)})</button></form>
+              {queue?.i_can_approve
+                ? <form action={approveCredit}><input type="hidden" name="id" value={id} /><button className="btn primary">Approve credit note ({money(inv.total)})</button></form>
+                : <span className="pill warn">Waiting for management approval</span>}
               <form action={discardCredit}><input type="hidden" name="id" value={id} /><input type="hidden" name="invoice" value={inv.credit_for ?? ''} /><button className="btn ghost">Discard</button></form>
             </div>
           )}

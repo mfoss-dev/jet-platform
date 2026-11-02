@@ -4,6 +4,7 @@ import { day, money, one } from '@/lib/format';
 import { SELECTS } from '@/lib/selects';
 import { getMe } from '@/lib/session';
 import { createClient } from '@/lib/supabase/server';
+import { setCreditLimit } from './actions';
 import { STATUS } from './labels';
 
 type Inv = { id: string; branch_code: string; number: number | null; kind: string; invoice_date: string; due_date: string | null; total: number; status: string; flags: string[]; reason: string | null; bill_to: { id: string; name: string; account_code: string } | null };
@@ -25,9 +26,17 @@ export default async function Invoices({ searchParams }: PageProps<'/stream/invo
   const branch = pick(sp.branch);
   const kind = pick(sp.kind);
   const page = Math.max(0, Number(pick(sp.page)) || 0);
+  const msg = pick(sp.msg);
   const supabase = await createClient();
   const { data: draftData } = await supabase.from(SELECTS.invoiceList.table).select(SELECTS.invoiceList.select).eq('kind', 'credit').eq('status', 'draft').order('invoice_date').limit(100);
   const draftCredits = ((draftData ?? []) as unknown as Inv[]).map((i) => ({ ...i, bill_to: one(i.bill_to) }));
+  const [{ data: queueData }, { data: limitData }] = await Promise.all([
+    supabase.from(SELECTS.creditQueue.table).select(SELECTS.creditQueue.select).limit(100),
+    supabase.from(SELECTS.creditLimits.table).select(SELECTS.creditLimits.select).order('code'),
+  ]);
+  const queue = new Map((queueData ?? []).map((q) => [q.id, q]));
+  const limits = limitData ?? [];
+  const isManager = ['owner', 'management'].includes(me.role);
 
   let list = supabase.from(SELECTS.invoiceList.table).select(SELECTS.invoiceList.select, { count: 'exact' }).neq('status', 'draft');
   if (branch) list = list.eq('branch_code', branch);
@@ -53,20 +62,41 @@ export default async function Invoices({ searchParams }: PageProps<'/stream/invo
           </div>
         )}
       </div>
+      {msg && <div className={`banner ${/^Not /.test(msg) ? 'warn' : ''}`} role="status">{msg}</div>}
       {draftCredits.length > 0 && (
         <div className="card">
           <h3>Credit notes waiting for approval ({draftCredits.length})</h3>
           <table className="mt8">
-            <thead><tr><th>Bill to</th><th>Branch</th><th>Raised</th><th>Reason</th><th className="r">Amount</th></tr></thead>
+            <thead><tr><th>Bill to</th><th>Branch</th><th>Raised</th><th>Reason</th><th className="r">Amount</th><th>Approves</th></tr></thead>
             <tbody>
-              {draftCredits.map((i) => (
-                <tr key={i.id}>
-                  <td><Link href={`/stream/invoices/${i.id}`}>{i.bill_to?.name}</Link> <span className="hint">{i.bill_to?.account_code}</span></td>
-                  <td>{i.branch_code}</td><td>{day(i.invoice_date)}</td><td>{i.reason}</td><td className="r">{money(i.total)}</td>
-                </tr>
-              ))}
+              {draftCredits.map((i) => {
+                const qd = queue.get(i.id);
+                return (
+                  <tr key={i.id}>
+                    <td><Link href={`/stream/invoices/${i.id}`}>{i.bill_to?.name}</Link> <span className="hint">{i.bill_to?.account_code}</span></td>
+                    <td>{i.branch_code}</td><td>{day(i.invoice_date)}{qd?.raised_by ? <span className="hint"> · {qd.raised_by}</span> : ''}</td><td>{i.reason}</td><td className="r">{money(i.total)}</td>
+                    <td>{qd?.needs_management ? 'Management' : 'Finance'}{qd?.i_can_approve && <span className="pill ok" style={{ marginLeft: 6 }}>You can</span>}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+        </div>
+      )}
+      {kind === 'credit' && (
+        <div className="card">
+          <h3>Credit approval limit</h3>
+          <p className="hint">Finance approve credit notes up to this amount (inc GST). Above it, management approves, and never the person who raised it.</p>
+          <div className="flex mt8">
+            {limits.map((b) => isManager ? (
+              <form key={b.code} action={setCreditLimit} className="flex">
+                <input type="hidden" name="branch" value={b.code} />
+                <label htmlFor={`lim-${b.code}`}>{b.name} ({b.currency})</label>
+                <input id={`lim-${b.code}`} name="limit" type="number" min="0" step="1" defaultValue={Number(b.credit_approval_limit)} style={{ width: 110 }} />
+                <button className="btn sm">Save</button>
+              </form>
+            ) : <span key={b.code}>{b.name}: <b>{money(b.credit_approval_limit)}</b> {b.currency}</span>)}
+          </div>
         </div>
       )}
       <form className="filters" action="/stream/invoices">

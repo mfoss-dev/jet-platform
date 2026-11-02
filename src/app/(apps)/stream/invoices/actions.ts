@@ -37,6 +37,17 @@ export async function approveCredit(formData: FormData) {
   back(`/stream/invoices/${id}`, `Credit note ${data} approved · logged`);
 }
 
+export async function setCreditLimit(formData: FormData) {
+  const branch = String(formData.get('branch'));
+  const limit = Number(formData.get('limit'));
+  if (!Number.isFinite(limit) || limit < 0) back('/stream/invoices', 'Not saved: the limit must be zero or more.');
+  const supabase = await createClient();
+  const { error } = await supabase.rpc('set_credit_approval_limit', { p_branch: branch, p_limit: limit });
+  revalidatePath('/stream/invoices');
+  if (error) redirect(`/stream/invoices?kind=credit&msg=${encodeURIComponent(`Not saved: ${error.message}`)}`);
+  redirect(`/stream/invoices?kind=credit&msg=${encodeURIComponent(`Credit approval limit for ${branch} set to ${limit} · logged`)}`);
+}
+
 export async function discardCredit(formData: FormData) {
   const id = String(formData.get('id'));
   const invoice = String(formData.get('invoice'));

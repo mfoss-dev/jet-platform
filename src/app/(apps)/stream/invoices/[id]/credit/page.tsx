@@ -52,7 +52,7 @@ export default async function RaiseCredit({ params, searchParams }: PageProps<'/
       {!open.length ? <div className="card"><p className="hint">Every line on this invoice has been credited.</p></div> : (
         <form action={raiseCredit} className="card">
           <input type="hidden" name="invoice" value={id} />
-          <p className="hint">Tick the lines to credit and change the amount for a part credit. Amounts are ex GST; fuel, security and GST are credited in proportion. The credit note is a draft until approved.</p>
+          <p className="hint">Tick the lines to credit and change the amount for a part credit. Amounts are ex GST; fuel, security and GST are credited in proportion. The credit note is a draft until approved: finance can approve one up to the branch&apos;s approval limit; above it, management approves.</p>
           <table className="mt8">
             <thead><tr><th /><th>Shipment</th><th>Line</th><th className="r">Billed ex GST</th><th className="r">Left to credit</th><th className="r">Credit ex GST</th></tr></thead>
             <tbody>

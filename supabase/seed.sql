@@ -23,18 +23,32 @@ insert into public.fuel_surcharges (carrier_code, rate_pct, effective_from) valu
   ('FEDEX', 39.0, '2026-10-26'), ('FEDEX', 39.5, '2026-11-02')
 on conflict do nothing;
 
-insert into public.customers (id, account_code, name, branch_code, status, payment_terms_days, billing_email) values
-  ('c0000000-0000-4000-8000-000000000001', 'SYD1021', 'Harbour Optics', 'AU', 'active', 14, 'accounts@harbouroptics.example'),
-  ('c0000000-0000-4000-8000-000000000002', 'SYD1007', 'Kestrel Medical', 'AU', 'active', 30, 'ap@kestrelmedical.example'),
-  ('c0000000-0000-4000-8000-000000000003', 'SYD1088', 'Bondi Surf Supply', 'AU', 'active', 14, 'office@bondisurf.example'),
-  ('c0000000-0000-4000-8000-000000000004', 'SYD1112', 'Northside Print', 'AU', 'active', 14, 'hello@northsideprint.example'),
-  ('c0000000-0000-4000-8000-000000000005', 'SYD1034', 'Coastal Pharma', 'AU', 'active', 30, 'finance@coastalpharma.example'),
-  ('c0000000-0000-4000-8000-000000000006', 'SYD1150', 'Redfern Tiles', 'AU', 'on_hold', 14, 'accounts@redferntiles.example'),
-  ('c0000000-0000-4000-8000-000000000007', 'SYD1163', 'Coastal Cycles', 'AU', 'active', 14, 'admin@coastalcycles.example'),
-  ('c0000000-0000-4000-8000-000000000008', 'SYD1170', 'Bright Labs', 'AU', 'active', 14, 'ops@brightlabs.example'),
-  ('c0000000-0000-4000-8000-000000000009', 'AKL2033', 'Kauri Craft Ltd', 'NZ', 'on_hold', 20, 'accounts@kauricraft.example'),
-  ('c0000000-0000-4000-8000-000000000010', 'AKL2041', 'Tasman Outdoor', 'NZ', 'active', 20, 'ap@tasmanoutdoor.example')
+insert into public.customers (id, account_code, name, branch_code, status, payment_terms_days, billing_email, hold_reason, hold_note) values
+  ('c0000000-0000-4000-8000-000000000001', 'SYD1021', 'Harbour Optics', 'AU', 'active', 14, 'accounts@harbouroptics.example', null, null),
+  ('c0000000-0000-4000-8000-000000000002', 'SYD1007', 'Kestrel Medical', 'AU', 'active', 30, 'ap@kestrelmedical.example', null, null),
+  ('c0000000-0000-4000-8000-000000000003', 'SYD1088', 'Bondi Surf Supply', 'AU', 'active', 14, 'office@bondisurf.example', null, null),
+  ('c0000000-0000-4000-8000-000000000004', 'SYD1112', 'Northside Print', 'AU', 'active', 14, 'hello@northsideprint.example', null, null),
+  ('c0000000-0000-4000-8000-000000000005', 'SYD1034', 'Coastal Pharma', 'AU', 'active', 30, 'finance@coastalpharma.example', null, null),
+  ('c0000000-0000-4000-8000-000000000006', 'SYD1150', 'Redfern Tiles', 'AU', 'on_hold', 14, 'accounts@redferntiles.example', 'overdue', 'Invoice 13080 is 21 days overdue'),
+  ('c0000000-0000-4000-8000-000000000007', 'SYD1163', 'Coastal Cycles', 'AU', 'active', 14, 'admin@coastalcycles.example', null, null),
+  ('c0000000-0000-4000-8000-000000000008', 'SYD1170', 'Bright Labs', 'AU', 'active', 14, 'ops@brightlabs.example', null, null),
+  ('c0000000-0000-4000-8000-000000000009', 'AKL2033', 'Kauri Craft Ltd', 'NZ', 'on_hold', 20, 'accounts@kauricraft.example', 'overdue', 'Promised payment Friday (Maree)'),
+  ('c0000000-0000-4000-8000-000000000010', 'AKL2041', 'Tasman Outdoor', 'NZ', 'active', 20, 'ap@tasmanoutdoor.example', null, null)
 on conflict (id) do nothing;
+
+update public.customers set held_at = now() where status = 'on_hold' and held_at is null;
+
+-- Customer margins (working assumption D6: carrier rate plus a margin by zone and weight band).
+insert into public.customer_margins (customer_id, zone_code, band, margin_pct, updated_by)
+select c.id, z.code, b.band,
+       round((case c.account_code when 'SYD1021' then 28 when 'SYD1007' then 24 else 30 end)
+             + z.sort * 0.5 + case b.band when '0.5' then 7 when '5' then 4 when '20' then 0 else -3 end, 1),
+       null
+from public.customers c
+cross join public.zones z
+cross join (values ('0.5'), ('5'), ('20'), ('20+')) as b (band)
+where c.account_code in ('SYD1021', 'SYD1007', 'SYD1088')
+on conflict do nothing;
 
 -- Week 44 exceptions: the seven rows on the billing feed's "Needs attention" view.
 insert into public.jobs (connote, customer_id, branch_code, carrier_code, service_id, booked_at, origin_city, origin_country, dest_city, dest_country,

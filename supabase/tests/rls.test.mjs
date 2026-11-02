@@ -122,6 +122,49 @@ const run = async () => {
     }), /blocked/);
   });
   results.push('  ✓ people cannot promote themselves');
+
+  const monica = await signUp('monica@jetworldwide.example');
+  const rw = async (connote) => one(`select r.id, j.sell_ex_gst, j.billing_status, j.issue from public.reweighs r join public.jobs j on j.id = r.job_id where j.connote = $1`, [connote]);
+  await as(monica, 'monica@jetworldwide.example', async () => {
+    const before = await rw('JWW1048611');
+    const n = (await one(`select public.decide_reweighs(array[$1]::uuid[], 'pass_on', 'Customer agreed') as n`, [before.id])).n;
+    assert.equal(n, 1);
+    const after = await rw('JWW1048611');
+    assert.equal(Number(after.sell_ex_gst), Number(before.sell_ex_gst) + 16);
+    assert.deepEqual([after.billing_status, after.issue], ['ready', null]);
+    assert.equal((await one(`select decision from public.reweighs where id = $1`, [before.id])).decision, 'pass_on');
+    const again = (await one(`select public.decide_reweighs(array[$1]::uuid[], 'absorb') as n`, [before.id])).n;
+    assert.equal(again, 0, 'a decided reweigh is not decided twice');
+
+    const k = await rw('JWW1048802');
+    await db.query(`select public.decide_reweighs(array[$1]::uuid[], 'absorb')`, [k.id]);
+    const ka = await rw('JWW1048802');
+    assert.equal(Number(ka.sell_ex_gst), Number(k.sell_ex_gst), 'absorbing leaves the customer charge alone');
+    assert.equal(ka.billing_status, 'ready');
+  });
+  await as(sam, 'sam@jetworldwide.example', async () => {
+    const { id } = await one(`select id from public.reweighs limit 1`) ?? {};
+    assert.equal(id, undefined, 'reps cannot see reweighs');
+    await assert.rejects(db.query(`select public.decide_reweighs(array[gen_random_uuid()], 'absorb')`), /Only finance and management/);
+  });
+  results.push('  ✓ reweigh decisions update the job (pass on adds the charge, absorb does not); reps cannot decide');
+
+  await as(monica, 'monica@jetworldwide.example', async () => {
+    assert.ok(Number((await one('select count(*) from public.customer_margins')).count) > 0);
+    await db.query(`update public.customers set status = 'on_hold', hold_reason = 'overdue', hold_note = 'Test', held_at = now() where account_code = 'SYD1112'`);
+    await db.exec('savepoint no_reason');
+    await assert.rejects(db.query(`update public.customers set status = 'on_hold' where account_code = 'SYD1021'`), /customers_hold_check/);
+    await db.exec('rollback to savepoint no_reason');
+    const h = await one(`select count(*) from public.audit_log where table_name = 'customers' and actor_email = 'monica@jetworldwide.example'`);
+    assert.equal(Number(h.count), 1, 'finance can read customer history');
+    assert.equal(Number((await one(`select count(*) from public.audit_log where table_name = 'profiles'`)).count), 0, 'but not staff changes');
+  });
+  for (const [id, email] of [[sam, 'sam@jetworldwide.example'], [priya, 'priya@harbouroptics.example']]) {
+    await as(id, email, async () => {
+      assert.equal(Number((await one('select count(*) from public.customer_margins')).count), 0, `${email} must not see margins`);
+    });
+  }
+  results.push('  ✓ holds need a reason, finance sees customer history, margins are staff only');
 };
 
 try {

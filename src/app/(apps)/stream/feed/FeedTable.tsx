@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { day, money } from '@/lib/format';
 import { markReady, putOnHold, type ActionResult } from './actions';
 
 export type FeedRow = {
@@ -32,8 +33,6 @@ const ISSUE: Record<string, [string, 'bad' | 'warn']> = {
 const STATUS: Record<FeedRow['billing_status'], [string, string]> = {
   needs_attention: ['Needs attention', 'bad'], ready: ['Ready', 'ok'], on_hold: ['On hold', 'warn'], invoiced: ['Invoiced', ''],
 };
-const money = (n: number | null) => (n == null ? '—' : `$${Number(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-const day = (iso: string) => new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 
 export function FeedTable({ rows, canEdit, showCost }: { rows: FeedRow[]; canEdit: boolean; showCost: boolean }) {
   const [ticked, setTicked] = useState<Set<string>>(new Set());

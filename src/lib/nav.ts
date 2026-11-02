@@ -27,11 +27,11 @@ export const APPS: Record<AppKey, { name: string; short: string; icon: IconName;
     groups: [
       ['Daily work', [{ key: 'today', label: 'Today', icon: 'home' }, { key: 'feed', label: 'Billing feed', icon: 'list', live: true },
         { key: 'monitor', label: 'Shipment monitor', icon: 'monitor' }]],
-      ['Carriers', [{ key: 'reweighs', label: 'Reweighs', icon: 'scale' }, { key: 'cinv', label: 'Carrier invoices', icon: 'inbox' },
+      ['Carriers', [{ key: 'reweighs', label: 'Reweighs', icon: 'scale', live: true }, { key: 'cinv', label: 'Carrier invoices', icon: 'inbox' },
         { key: 'claims', label: 'Credit claims', icon: 'claim' }]],
       ['Billing', [{ key: 'run', label: 'Invoice run', icon: 'play' }, { key: 'invoices', label: 'Invoices & credits', icon: 'doc' },
         { key: 'exports', label: 'Accounting exports', icon: 'export' }]],
-      ['Customers & pricing', [{ key: 'customers', label: 'Customers', icon: 'users' }, { key: 'tariffs', label: 'Tariffs & fuel', icon: 'fuel' }]],
+      ['Customers & pricing', [{ key: 'customers', label: 'Customers', icon: 'users', live: true }, { key: 'tariffs', label: 'Tariffs & fuel', icon: 'fuel', live: true }]],
       ['Admin', [{ key: 'users', label: 'Users & roles', icon: 'shield' }, { key: 'audit', label: 'Audit log', icon: 'clock' }]],
     ],
   },

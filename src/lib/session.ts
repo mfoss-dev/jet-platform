@@ -1,6 +1,7 @@
 import { cache } from 'react';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { SELECTS } from '@/lib/selects';
 import { ROLE_APPS, type AppKey, type Role } from '@/lib/nav';
 
 export type Me = {
@@ -21,9 +22,9 @@ export const getMe = cache(async (): Promise<Me> => {
   if (!id) redirect('/login');
 
   const { data: p, error } = await supabase
-    .from('profiles')
-    // Named foreign key: customers also links to profiles through rep_id, so "customers" alone is ambiguous.
-    .select('email, full_name, role, active, customer:customers!profiles_customer_id_fkey(name, account_code)')
+    .from(SELECTS.profile.table)
+    // Named foreign key in SELECTS: customers also links to profiles through rep_id, so "customers" alone is ambiguous.
+    .select(SELECTS.profile.select)
     .eq('id', id)
     .maybeSingle();
   // A failed read must not quietly turn staff into customers. No row at all (uninvited) still means no access.

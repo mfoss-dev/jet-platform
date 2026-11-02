@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { SELECTS } from '@/lib/selects';
 import { getMe } from '@/lib/session';
 import { createClient } from '@/lib/supabase/server';
 import { FeedTable, type FeedRow } from './FeedTable';
@@ -22,8 +23,8 @@ export default async function BillingFeed({ searchParams }: PageProps<'/stream/f
 
   const supabase = await createClient();
   let query = supabase
-    .from('job_list')
-    .select('id, connote, customer_name, account_code, carrier_code, service_name, booked_at, origin_city, dest_city, dest_country, declared_weight_kg, carrier_weight_kg, sell_ex_gst, cost_ex_gst, margin_pct, status, billing_status, issue, issue_note')
+    .from(SELECTS.feed.table)
+    .select(SELECTS.feed.select)
     .order('booked_at', { ascending: false })
     .limit(500);
   if (view !== 'all') query = query.eq('billing_status', view);

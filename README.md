@@ -37,7 +37,9 @@ Sign-in is by emailed link. In the Supabase dashboard, **Authentication → URL 
 - **Every new table needs explicit `GRANT`s** in its migration (see `20261102000400_table_privileges.sql`). The hosted project doesn't grant new tables to the API roles automatically, and the tests mirror that, so a missing grant fails `npm run test:db`.
 - `npm run test:db`: runs all migrations and the seed in an in-memory Postgres (PGlite), then checks the access rules as management, a sales rep, a customer, an uninvited sign-in and a signed-out visitor.
 
-Apply migrations to the Test project (after `npx supabase login` and `npx supabase link --project-ref kyfqdevrvihtjfugmzrx`):
+- `npm run test:api`: after a deploy, checks every query the app sends (listed in `src/lib/selects.ts`) against the real Test API while signed out. A correct query is refused with "permission denied"; a typo, missing column or ambiguous join comes back as a query error. Add new queries to `selects.ts` so they're covered.
+
+Migrations apply to Test automatically on every push to `main` (Supabase's GitHub integration). To apply them by hand instead (after `npx supabase login` and `npx supabase link --project-ref kyfqdevrvihtjfugmzrx`):
 
 ```bash
 npx supabase db push --linked --include-seed

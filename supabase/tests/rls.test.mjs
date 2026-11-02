@@ -345,6 +345,44 @@ const run = async () => {
     assert.equal(Number((await one('select count(*) from public.invoice_runs')).count), 0);
   });
   results.push('  ✓ invoicing: grouped by bill-to, duties apart on 7 days, flags hold back exceptions, one-click approval numbers without gaps, carry-over and holds');
+
+  // ---- credit notes: part or all of a line, never more than was billed, numbered on approval, re-billed elsewhere
+  await as(sam, 'sam@jetworldwide.example', async () => {
+    await assert.rejects(db.query(`select public.create_credit_note(gen_random_uuid(), null, 'x')`), /Only finance/);
+  });
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    const run = (await one(`select public.prepare_invoice_run('AU', 'weekly', '2026-11-01') as id`)).id;
+    await db.query(`select public.approve_invoices($1, array(select id from public.invoices where run_id = $1 and bill_to_id = $2))`, [run, HARBOUR]);
+    const inv = await one(`select id, number, total::float from public.invoices where run_id = $1 and bill_to_id = $2`, [run, HARBOUR]);
+    const line = await one(`select id, (charge + fuel + security)::float as ex from public.charges where invoice_id = $1 order by charge desc limit 1`, [inv.id]);
+    const credit = async (lines, reason, rebill = null) =>
+      (await one(`select public.create_credit_note($1, $2, $3, $4) as id`, [inv.id, lines && JSON.stringify(lines), reason, rebill])).id;
+    const totals = async (id) => one(`select (charge_total + fuel_total + security_total)::float as ex, total::float, status, number from public.invoices where id = $1`, [id]);
+
+    const part = await credit([{ id: line.id, amount: 10 }], 'Wrong price');
+    assert.deepEqual(await totals(part).then((t) => [t.ex, t.status, t.number]), [-10, 'draft', null], 'part of a line, as a draft');
+    await db.exec('savepoint c1');
+    await assert.rejects(credit([{ id: line.id, amount: line.ex }], 'Again'), /can be credited up to/, 'draft credits count against the line');
+    await db.exec('rollback to savepoint c1');
+    const spare = await credit([{ id: line.id, amount: 5 }], 'Mistake');
+    await db.query(`select public.discard_credit_note($1)`, [spare]);
+    assert.equal(Number((await one(`select count(*) from public.charges where invoice_id = $1`, [spare])).count), 0, 'a discarded draft leaves nothing behind');
+    assert.equal(Number((await one(`select public.approve_credit_note($1) as n`, [part])).n), inv.number + 1, 'numbered from the branch sequence');
+
+    const rest = await credit(null, 'Billed to the wrong account', PHARMA);
+    const r = await totals(rest);
+    assert.ok(Math.abs(r.total + (await totals(part)).total + inv.total) < 0.005, 'the two credits clear the invoice exactly');
+    await db.query(`select public.approve_credit_note($1)`, [rest]);
+    const rebill = await one(`select count(*)::int as n, sum(charge + fuel + security + gst)::float as t from public.charges where customer_id = $1 and source = 'rebill' and status = 'new' and invoice_id is null`, [PHARMA]);
+    assert.ok(rebill.n > 0 && Math.abs(rebill.t + r.total) < 0.005, 're-billed lines wait for the next run on the right account');
+    await db.exec('savepoint c2');
+    await assert.rejects(credit(null, 'Once more'), /Nothing left/, 'nothing credits twice');
+    await db.exec('rollback to savepoint c2');
+
+    await db.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: priya, email: 'priya@harbouroptics.example' })]);
+    assert.equal(Number((await one(`select count(*) from public.invoices where kind = 'credit'`)).count), 2, 'the customer sees its approved credit notes');
+  });
+  results.push('  ✓ credit notes: part of a line or the rest of an invoice, never more than billed, numbered on approval, re-billed to another account');
 };
 
 try {

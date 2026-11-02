@@ -6,10 +6,16 @@ import { getMe } from '@/lib/session';
 import { createClient } from '@/lib/supabase/server';
 import { STATUS } from './labels';
 
-type Inv = { id: string; branch_code: string; number: number | null; kind: string; invoice_date: string; due_date: string | null; total: number; status: string; flags: string[]; bill_to: { id: string; name: string; account_code: string } | null };
+type Inv = { id: string; branch_code: string; number: number | null; kind: string; invoice_date: string; due_date: string | null; total: number; status: string; flags: string[]; reason: string | null; bill_to: { id: string; name: string; account_code: string } | null };
 
 const pick = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? '';
 const PAGE = 100;
+const KIND: Record<string, string> = { weekly: 'Weekly', duties: 'Duties', credit: 'Credit note' };
+const mondayThisWeek = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+};
 
 export default async function Invoices({ searchParams }: PageProps<'/stream/invoices'>) {
   const me = await getMe();
@@ -20,6 +26,8 @@ export default async function Invoices({ searchParams }: PageProps<'/stream/invo
   const kind = pick(sp.kind);
   const page = Math.max(0, Number(pick(sp.page)) || 0);
   const supabase = await createClient();
+  const { data: draftData } = await supabase.from(SELECTS.invoiceList.table).select(SELECTS.invoiceList.select).eq('kind', 'credit').eq('status', 'draft').order('invoice_date').limit(100);
+  const draftCredits = ((draftData ?? []) as unknown as Inv[]).map((i) => ({ ...i, bill_to: one(i.bill_to) }));
 
   let list = supabase.from(SELECTS.invoiceList.table).select(SELECTS.invoiceList.select, { count: 'exact' }).neq('status', 'draft');
   if (branch) list = list.eq('branch_code', branch);
@@ -38,18 +46,39 @@ export default async function Invoices({ searchParams }: PageProps<'/stream/invo
   return (
     <>
       <div className="top">
-        <div><h1>Invoices &amp; credits</h1><div className="sub">Every approved invoice, including JetStream&apos;s history since July 2026</div></div>
+        <div><h1>Invoices &amp; credits</h1><div className="sub">Every approved invoice and credit note, including JetStream&apos;s history since July 2026 · raise a credit note from the invoice</div></div>
+        {kind === 'credit' && (
+          <div className="flex">
+            {['AU', 'NZ'].map((b) => <a key={b} className="btn sm" href={`/stream/invoices/myob?branch=${b}&from=${mondayThisWeek()}&to=${new Date().toISOString().slice(0, 10)}`}>MYOB file · {b} credits this week</a>)}
+          </div>
+        )}
       </div>
+      {draftCredits.length > 0 && (
+        <div className="card">
+          <h3>Credit notes waiting for approval ({draftCredits.length})</h3>
+          <table className="mt8">
+            <thead><tr><th>Bill to</th><th>Branch</th><th>Raised</th><th>Reason</th><th className="r">Amount</th></tr></thead>
+            <tbody>
+              {draftCredits.map((i) => (
+                <tr key={i.id}>
+                  <td><Link href={`/stream/invoices/${i.id}`}>{i.bill_to?.name}</Link> <span className="hint">{i.bill_to?.account_code}</span></td>
+                  <td>{i.branch_code}</td><td>{day(i.invoice_date)}</td><td>{i.reason}</td><td className="r">{money(i.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       <form className="filters" action="/stream/invoices">
         <input name="q" defaultValue={q} placeholder="Invoice number, account or name" aria-label="Search invoices" />
         <select name="branch" className="f" defaultValue={branch} aria-label="Branch" style={{ width: 'auto' }}>
           <option value="">Both branches</option><option value="AU">Sydney</option><option value="NZ">Auckland</option>
         </select>
         <select name="kind" className="f" defaultValue={kind} aria-label="Type" style={{ width: 'auto' }}>
-          <option value="">All types</option><option value="weekly">Weekly</option><option value="duties">Duties</option>
+          <option value="">All types</option><option value="weekly">Weekly</option><option value="duties">Duties</option><option value="credit">Credit notes</option>
         </select>
         <button className="btn">Search</button>
-        <span className="hint">{(count ?? 0).toLocaleString()} invoices{pages > 1 ? ` · page ${page + 1} of ${pages}` : ''}</span>
+        <span className="hint">{(count ?? 0).toLocaleString()} {kind === 'credit' ? 'credit notes' : 'invoices'}{pages > 1 ? ` · page ${page + 1} of ${pages}` : ''}</span>
         {page > 0 && <Link className="btn sm" href={link(page - 1)}>← Newer</Link>}
         {page + 1 < pages && <Link className="btn sm" href={link(page + 1)}>Older →</Link>}
       </form>
@@ -61,7 +90,7 @@ export default async function Invoices({ searchParams }: PageProps<'/stream/invo
               <tr key={i.id}>
                 <td><Link href={`/stream/invoices/${i.id}`}><b>{i.number ?? '—'}</b></Link></td>
                 <td>{i.bill_to?.name} <span className="hint">{i.bill_to?.account_code}</span></td>
-                <td>{i.branch_code}</td><td>{i.kind === 'duties' ? 'Duties' : 'Weekly'}</td>
+                <td>{i.branch_code}</td><td>{KIND[i.kind] ?? i.kind}</td>
                 <td>{day(i.invoice_date)}</td><td>{day(i.due_date)}</td><td className="r">{money(i.total)}</td>
                 <td><span className={`pill ${STATUS[i.status]?.[1] ?? ''}`}>{STATUS[i.status]?.[0] ?? i.status}</span></td>
               </tr>

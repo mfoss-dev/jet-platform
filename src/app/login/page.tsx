@@ -19,6 +19,7 @@ async function sendLink(formData: FormData) {
     email,
     options: { emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(next)}` },
   });
+  if (error?.code === 'over_email_send_rate_limit' || /rate limit/i.test(error?.message ?? '')) redirect('/login?error=rate');
   redirect(error ? `/login?error=send&detail=${encodeURIComponent(error.message)}` : `/login?sent=${encodeURIComponent(email)}`);
 }
 
@@ -26,6 +27,7 @@ const ERRORS: Record<string, string> = {
   email: 'Please enter a valid email address.',
   send: 'The sign-in email could not be sent.',
   link: 'That sign-in link has expired or was already used. Send a new one.',
+  rate: 'Too many sign-in emails have been sent in the last hour. If you already have a recent link, use that; otherwise try again later.',
 };
 
 export default async function LoginPage({ searchParams }: PageProps<'/login'>) {

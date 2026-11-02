@@ -150,7 +150,7 @@ const run = async () => {
   results.push('  ✓ reweigh decisions update the job (pass on adds the charge, absorb does not); reps cannot decide');
 
   await as(monica, 'monica@jetworldwide.example', async () => {
-    assert.ok(Number((await one('select count(*) from public.customer_margins')).count) > 0);
+    assert.ok(Number((await one('select count(*) from public.sales_margins')).count) > 0);
     await db.query(`update public.customers set status = 'on_hold', hold_reason = 'overdue', hold_note = 'Test', held_at = now() where account_code = 'SYD1112'`);
     await db.exec('savepoint no_reason');
     await assert.rejects(db.query(`update public.customers set status = 'on_hold' where account_code = 'SYD1021'`), /customers_hold_check/);
@@ -161,10 +161,59 @@ const run = async () => {
   });
   for (const [id, email] of [[sam, 'sam@jetworldwide.example'], [priya, 'priya@harbouroptics.example']]) {
     await as(id, email, async () => {
-      assert.equal(Number((await one('select count(*) from public.customer_margins')).count), 0, `${email} must not see margins`);
+      assert.equal(Number((await one('select count(*) from public.sales_margins')).count), 0, `${email} must not see margins`);
     });
   }
   results.push('  ✓ holds need a reason, finance sees customer history, margins are staff only');
+
+  // ---- tariffs
+  const V1 = '7b000000-0000-4000-8000-000000000001', V2 = '7b000000-0000-4000-8000-000000000002';
+  const HARBOUR = 'c0000000-0000-4000-8000-000000000001';
+  const cell = async (v, toKg, zone = '6') => Number((await one(`select charge from public.tariff_cells where version_id = $1 and kind = 'parcel' and to_kg = $2 and zone_code = $3`, [v, toKg, zone])).charge);
+  const charge = async (v, w, zone = '6') => Number((await one(`select public.tariff_charge($1, $2, 'parcel', $3) as c`, [v, zone, w])).c);
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    assert.equal(await charge(V1, 0.4), await cell(V1, 0.5), 'flat break: 0.4 kg costs the 0.5 kg price');
+    assert.equal(await charge(V1, 3.2), Math.round((await cell(V1, 2) + 3 * await cell(V1, 5)) * 100) / 100, 'per-step break: the 2 kg price plus three 0.5 kg steps');
+    assert.equal(await charge(V1, 40), Math.round(40 * await cell(V1, 300) * 100) / 100, 'per-kg break: the rate times the whole weight');
+    assert.equal((await one(`select public.tariff_charge($1, '6', 'parcel', 500) as c`, [V1])).c, null, 'heavier than the last break has no price');
+    const p = await one(`select * from public.price_shipment($1, '6', 'parcel', 3.2, '2026-06-01')`, [HARBOUR]);
+    assert.deepEqual([p.sales_tariff, p.version, Number(p.margin_pct)], ['KEY', 1, 29]);
+    assert.equal(Number(p.price), Math.round(Number(p.base_charge) * 1.29 * 100) / 100);
+  });
+  results.push('  ✓ tariff pricing follows JetStream: flat, per-step and per-kg breaks, plus the sales margin');
+
+  await as(monica, 'monica@jetworldwide.example', async () => {
+    await db.exec('savepoint locked');
+    await assert.rejects(db.query(`update public.tariff_cells set charge = 1 where version_id = $1`, [V1]), /published and locked/);
+    await db.exec('rollback to savepoint locked');
+    const breaks = (await db.query(`select kind, to_kg, method, step_kg from public.tariff_breaks where version_id = $1 order by kind, to_kg`, [V2])).rows;
+    const cells = (await db.query(`select kind, to_kg, zone_code, charge from public.tariff_cells where version_id = $1`, [V2])).rows;
+    const payload = breaks.map((b) => ({ ...b, to_kg: Number(b.to_kg), step_kg: Number(b.step_kg),
+      cells: Object.fromEntries(cells.filter((c) => c.kind === b.kind && Number(c.to_kg) === Number(b.to_kg)).map((c) => [c.zone_code, Number(c.charge) + (c.zone_code === '6' ? 1 : 0)])) }));
+    const changed = (await one(`select public.save_tariff_draft($1, $2::jsonb, 'Zone 6 +$1') as n`, [V2, JSON.stringify(payload)])).n;
+    assert.equal(changed, breaks.length, 'one zone-6 cell per break changed');
+    assert.equal(Number((await one(`select count(*) from public.audit_log where table_name = 'tariff_cells' and actor_email = 'monica@jetworldwide.example'`)).count), 1, 'the save is one audit entry');
+    await db.exec('savepoint publish');
+    await assert.rejects(db.query(`select public.publish_tariff_version($1, '2027-01-01')`, [V2]), /Only management/);
+    await db.exec('rollback to savepoint publish');
+  });
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    await db.exec('savepoint early');
+    await assert.rejects(db.query(`select public.publish_tariff_version($1, '2025-12-01')`, [V2]), /Start date must be after/);
+    await db.exec('rollback to savepoint early');
+    await db.query(`select public.publish_tariff_version($1, '2027-01-01')`, [V2]);
+    assert.equal((await one(`select * from public.price_shipment($1, '6', 'parcel', 3.2, '2026-12-31')`, [HARBOUR])).version, 1);
+    assert.equal((await one(`select * from public.price_shipment($1, '6', 'parcel', 3.2, '2027-01-01')`, [HARBOUR])).version, 2);
+    const v3 = (await one(`select public.new_tariff_draft($1) as id`, [V2])).id;
+    assert.equal(Number((await one(`select count(*) from public.tariff_cells where version_id = $1`, [v3])).count), Number((await one(`select count(*) from public.tariff_cells where version_id = $1`, [V2])).count));
+  });
+  for (const [id, email] of [[sam, 'sam@jetworldwide.example'], [priya, 'priya@harbouroptics.example']]) {
+    await as(id, email, async () => {
+      assert.equal(Number((await one('select count(*) from public.tariff_cells')).count), 0, `${email} must not see rates`);
+      assert.equal((await one(`select problem from public.price_shipment($1, '6', 'parcel', 3.2)`, [HARBOUR])).problem, 'The customer has no sales tariff on this date');
+    });
+  }
+  results.push('  ✓ published rate cards are locked; finance edits drafts (one audit entry), management publishes; right version by date; rates staff only');
 };
 
 try {

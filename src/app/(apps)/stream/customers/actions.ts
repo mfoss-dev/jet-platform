@@ -36,3 +36,21 @@ export async function releaseHold(formData: FormData) {
   const id = String(formData.get('id'));
   await update(id, { status: 'active', hold_reason: null, hold_note: null, held_at: null }, 'Hold released · logged');
 }
+
+// Put a customer on a sales tariff from a date. A later date schedules a change; the same date corrects it.
+export async function assignTariff(formData: FormData) {
+  const id = String(formData.get('id'));
+  const sales = String(formData.get('sales_tariff_id') ?? '');
+  const from = String(formData.get('effective_from') ?? '');
+  const go = (msg: string): never => redirect(`/stream/customers/${id}?msg=${encodeURIComponent(msg)}`);
+  if (!sales || !/^\d{4}-\d{2}-\d{2}$/.test(from)) go('Choose a sales tariff and a start date.');
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('customer_tariffs')
+    .upsert({ customer_id: id, sales_tariff_id: sales, effective_from: from }, { onConflict: 'customer_id,effective_from' })
+    .select('customer_id');
+  revalidatePath('/stream', 'layout');
+  if (error) go(`Not saved: ${error.message}`);
+  if (!data?.length) go('Not saved: you don’t have permission to change customer rates.');
+  go(`Sales tariff set from ${from} · logged`);
+}

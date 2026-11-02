@@ -4,10 +4,12 @@ import { BILLING_EDITORS, day, one } from '@/lib/format';
 import { SELECTS } from '@/lib/selects';
 import { getMe } from '@/lib/session';
 import { createClient } from '@/lib/supabase/server';
-import { cancelFuel, saveMargins, scheduleFuel } from './actions';
+import { cancelFuel, scheduleFuel } from './actions';
+import { PriceCheck } from './PriceCheck';
+import { RateCards } from './RateCards';
+import { SalesTariffs } from './SalesTariffs';
 
-const TABS = [['fuel', 'Fuel surcharge'], ['margins', 'Customer margins'], ['tables', 'Tariff tables']] as const;
-const BANDS = [['0.5', '≤ 0.5 kg'], ['5', '≤ 5 kg'], ['20', '≤ 20 kg'], ['20+', 'Over 20 kg']] as const;
+const TABS = [['fuel', 'Fuel surcharge'], ['rates', 'Rate cards'], ['sales', 'Sales tariffs'], ['price', 'Price check']] as const;
 
 type Fuel = { id: string; carrier_code: string; rate_pct: number; effective_from: string; created_at: string; carrier: { name: string } | null };
 const pick = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? '';
@@ -25,6 +27,7 @@ export default async function Tariffs({ searchParams }: PageProps<'/stream/tarif
   const tab = (TABS.some(([t]) => t === sp.tab) ? sp.tab : 'fuel') as (typeof TABS)[number][0];
   const msg = pick(sp.msg);
   const canEdit = BILLING_EDITORS.includes(me.role);
+  const canPublish = ['owner', 'management', 'admin'].includes(me.role);
   const supabase = await createClient();
 
   return (
@@ -37,19 +40,11 @@ export default async function Tariffs({ searchParams }: PageProps<'/stream/tarif
           <Link key={t} href={{ pathname: '/stream/tariffs', query: { tab: t } }} scroll={false}><span className={t === tab ? 'on' : ''}>{label}</span></Link>
         ))}
       </div>
-      {msg && <div className={`banner ${msg.startsWith('Not ') || msg.includes('must') || msg.startsWith('Choose') ? 'warn' : ''}`} role="status">{msg}</div>}
+      {msg && <div className={`banner ${/^(Not |No |Choose|Give)|must/.test(msg) ? 'warn' : ''}`} role="status">{msg}</div>}
       {tab === 'fuel' && <FuelTab supabase={supabase} canEdit={canEdit} />}
-      {tab === 'margins' && <MarginsTab supabase={supabase} canEdit={canEdit} customerId={pick(sp.customer)} />}
-      {tab === 'tables' && (
-        <div className="card">
-          <h3>Tariff tables</h3>
-          <p>Stored rate cards (for carriers or services without a live rate) wait on two things:</p>
-          <ul>
-            <li><b>Decision Q2 / D6</b> with Chris: live carrier rate plus a customer margin (the working assumption, shown under Customer margins), or stored tariffs, or both.</li>
-            <li><b>Wayne&apos;s JetStream database</b>: restoring the backup gives us the real zones, weight breaks and rate tables to import, instead of guessing their shape.</li>
-          </ul>
-        </div>
-      )}
+      {tab === 'rates' && <RateCards supabase={supabase} canEdit={canEdit} canPublish={canPublish} tariffId={pick(sp.tariff)} versionId={pick(sp.version)} />}
+      {tab === 'sales' && <SalesTariffs supabase={supabase} canEdit={canEdit} salesId={pick(sp.sales)} />}
+      {tab === 'price' && <PriceCheck supabase={supabase} params={{ customer: pick(sp.customer), zone: pick(sp.zone), kind: pick(sp.kind), weight: pick(sp.weight), date: pick(sp.date) }} />}
     </>
   );
 }
@@ -126,60 +121,6 @@ async function FuelTab({ supabase, canEdit }: { supabase: Awaited<ReturnType<typ
         ) : <p className="hint">Nothing scheduled.</p>}
         <p className="hint mt8">Jobs are rated with the rate in force on their booking date. Past rates stay as the record of what was charged.</p>
       </div>
-    </div>
-  );
-}
-
-async function MarginsTab({ supabase, canEdit, customerId }: { supabase: Awaited<ReturnType<typeof createClient>>; canEdit: boolean; customerId: string }) {
-  const [{ data: customers }, { data: zones }] = await Promise.all([
-    supabase.from(SELECTS.customerPicker.table).select(SELECTS.customerPicker.select).neq('status', 'closed').order('name'),
-    supabase.from(SELECTS.zones.table).select(SELECTS.zones.select).order('sort'),
-  ]);
-  const selected = (customers ?? []).find((c) => c.id === customerId) ?? (customers ?? [])[0];
-  const { data: margins } = selected
-    ? await supabase.from(SELECTS.margins.table).select(SELECTS.margins.select).eq('customer_id', selected.id)
-    : { data: [] };
-  const cell = (zone: string, band: string) => (margins ?? []).find((m) => m.zone_code === zone && m.band === band)?.margin_pct;
-  const lastChange = (margins ?? []).map((m) => m.updated_at).sort().at(-1);
-
-  return (
-    <div className="card">
-      <form className="flex" action="/stream/tariffs" style={{ marginBottom: 12 }}>
-        <input type="hidden" name="tab" value="margins" />
-        <select name="customer" className="f" defaultValue={selected?.id} aria-label="Customer" style={{ maxWidth: 360 }}>
-          {(customers ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} · {c.account_code}</option>)}
-        </select>
-        <button className="btn">Show</button>
-        <span className="hint">Margin on top of the carrier&apos;s rate, by zone and weight. Working assumption D6, to confirm with Chris (Q2).</span>
-      </form>
-
-      {selected && (
-        <form action={saveMargins}>
-          <input type="hidden" name="customer_id" value={selected.id} />
-          <div className="tw">
-            <table>
-              <thead><tr><th>Zone</th>{BANDS.map(([, l]) => <th key={l} className="r">{l}</th>)}</tr></thead>
-              <tbody>
-                {(zones ?? []).map((z) => (
-                  <tr key={z.code}>
-                    <td>{z.code} · {z.name}</td>
-                    {BANDS.map(([b]) => (
-                      <td key={b} className="r">
-                        <input name={`m|${z.code}|${b}`} defaultValue={cell(z.code, b) ?? ''} inputMode="decimal" disabled={!canEdit}
-                          aria-label={`Zone ${z.name}, ${b} kg margin %`} style={{ width: 80, textAlign: 'right' }} placeholder="—" />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex mt">
-            {canEdit && <button className="btn primary">Save margins</button>}
-            <span className="hint">Percent, e.g. 28 for 28%. Blank means no margin set (the job shows &ldquo;No rate&rdquo;).{lastChange ? ` Last changed ${day(lastChange)}.` : ''}</span>
-          </div>
-        </form>
-      )}
     </div>
   );
 }

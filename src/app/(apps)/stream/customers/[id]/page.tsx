@@ -4,7 +4,7 @@ import { BILLING_EDITORS, day, dayTime, money, one } from '@/lib/format';
 import { SELECTS } from '@/lib/selects';
 import { getMe } from '@/lib/session';
 import { createClient } from '@/lib/supabase/server';
-import { placeHold, releaseHold, saveTerms } from '../actions';
+import { assignTariff, placeHold, releaseHold, saveTerms } from '../actions';
 import { HOLD_REASON } from '../labels';
 
 type Customer = {
@@ -34,11 +34,16 @@ export default async function CustomerDetail({ params, searchParams }: PageProps
   const msg = (await searchParams).msg;
 
   const supabase = await createClient();
-  const [{ data }, { data: jobs }, { data: history }] = await Promise.all([
+  const [{ data }, { data: jobs }, { data: history }, { data: tariffs }, { data: salesList }] = await Promise.all([
     supabase.from(SELECTS.customer.table).select(SELECTS.customer.select).eq('id', id).maybeSingle(),
     supabase.from(SELECTS.customerJobs.table).select(SELECTS.customerJobs.select).eq('customer_id', id).order('booked_at', { ascending: false }).limit(10),
     supabase.from(SELECTS.history.table).select(SELECTS.history.select).eq('table_name', 'customers').eq('row_id', id).order('at', { ascending: false }).limit(20),
+    supabase.from(SELECTS.customerTariffs.table).select(SELECTS.customerTariffs.select).eq('customer_id', id).order('effective_from', { ascending: false }),
+    supabase.from(SELECTS.salesTariffs.table).select(SELECTS.salesTariffs.select).order('code'),
   ]);
+  const today = new Date().toISOString().slice(0, 10);
+  const tariffRows = (tariffs ?? []).map((t) => ({ ...t, sales: one(t.sales as { code: string; name: string } | { code: string; name: string }[] | null) }));
+  const currentTariff = tariffRows.find((t) => t.effective_from <= today);
   if (!data) notFound();
   const c = { ...(data as unknown as Customer), rep: one((data as unknown as Customer).rep) };
   const canEdit = BILLING_EDITORS.includes(me.role);
@@ -107,6 +112,30 @@ export default async function CustomerDetail({ params, searchParams }: PageProps
           ))}
           <p className="hint mt8">On hold, the customer can&apos;t book in the portal (portal phase); jobs already booked still bill.</p>
         </div>
+      </div>
+
+      <div className="card mt">
+        <h3>Rates</h3>
+        <p>
+          Sales tariff: <b>{currentTariff?.sales?.name ?? 'none'}</b>
+          {currentTariff ? <span className="hint"> · since {day(currentTariff.effective_from)} · </span> : ' · '}
+          <Link href={{ pathname: '/stream/tariffs', query: { tab: 'price', customer: c.id } }}>Price check</Link>
+        </p>
+        {tariffRows.some((t) => t.effective_from > today) && (
+          <p className="hint">Scheduled: {tariffRows.filter((t) => t.effective_from > today).map((t) => `${t.sales?.name} from ${day(t.effective_from)}`).join(', ')}</p>
+        )}
+        {canEdit && (
+          <form action={assignTariff} className="flex">
+            <input type="hidden" name="id" value={c.id} />
+            <select name="sales_tariff_id" className="f" defaultValue={currentTariff?.sales_tariff_id ?? ''} required aria-label="Sales tariff">
+              <option value="" disabled>Choose a sales tariff…</option>
+              {(salesList ?? []).map((st) => <option key={st.id} value={st.id}>{st.name} ({st.code})</option>)}
+            </select>
+            <label htmlFor="tf" style={{ margin: 0 }}>from</label>
+            <input id="tf" type="date" name="effective_from" defaultValue={today} required style={{ width: 160 }} />
+            <button className="btn">Set tariff</button>
+          </form>
+        )}
       </div>
 
       <div className="grid k11 mt">

@@ -38,16 +38,77 @@ on conflict (id) do nothing;
 
 update public.customers set held_at = now() where status = 'on_hold' and held_at is null;
 
--- Customer margins (working assumption D6: carrier rate plus a margin by zone and weight band).
-insert into public.customer_margins (customer_id, zone_code, band, margin_pct, updated_by)
-select c.id, z.code, b.band,
-       round((case c.account_code when 'SYD1021' then 28 when 'SYD1007' then 24 else 30 end)
-             + z.sort * 0.5 + case b.band when '0.5' then 7 when '5' then 4 when '20' then 0 else -3 end, 1),
-       null
+-- Demo tariffs, shaped like JetStream's: a DHL Express rate card (zone x weight break), a published version
+-- from 1 Jan 2026 and a 2027 draft at +3.5%, two sales tariffs (margin by zone and weight band) and customer assignments.
+insert into public.base_tariffs (id, code, name, branch_code, carrier_code, service_id) values
+  ('7a000000-0000-4000-8000-000000000001', 'DHL-WPX-AU', 'DHL Express Worldwide (Sydney)', 'AU', 'DHL', '5e000000-0000-4000-8000-000000000001')
+on conflict (id) do nothing;
+
+insert into public.tariff_versions (id, tariff_id, version, note) values
+  ('7b000000-0000-4000-8000-000000000001', '7a000000-0000-4000-8000-000000000001', 1, '2026 DHL rates')
+on conflict (id) do nothing;
+
+-- Rows are added only while the version is still a draft (published rate cards are locked).
+insert into public.tariff_breaks (version_id, kind, to_kg, method, step_kg)
+select '7b000000-0000-4000-8000-000000000001', b.kind, b.to_kg, b.method, b.step
+from (values ('doc', 0.5, 'E', 0.5), ('doc', 1.0, 'E', 0.5), ('doc', 2.0, 'E', 0.5),
+             ('parcel', 0.5, 'E', 0.5), ('parcel', 1.0, 'E', 0.5), ('parcel', 2.0, 'E', 0.5), ('parcel', 5.0, 'I', 0.5),
+             ('parcel', 10.0, 'I', 0.5), ('parcel', 20.0, 'I', 0.5), ('parcel', 30.0, 'I', 0.5), ('parcel', 300.0, 'M', 1.0)) as b (kind, to_kg, method, step)
+where exists (select 1 from public.tariff_versions where id = '7b000000-0000-4000-8000-000000000001' and status = 'draft')
+  and not exists (select 1 from public.tariff_breaks where version_id = '7b000000-0000-4000-8000-000000000001');
+
+insert into public.tariff_cells (version_id, kind, to_kg, zone_code, charge)
+select b.version_id, b.kind, b.to_kg, z.code,
+       round(case
+         when b.to_kg = 0.5 then 28 + z.sort * 4
+         when b.to_kg = 1.0 then 34 + z.sort * 5
+         when b.to_kg = 2.0 then 42 + z.sort * 6
+         when b.method = 'I' then 3 + z.sort * 0.6 - (b.to_kg / 30)
+         else 6 + z.sort * 0.8
+       end - case when b.kind = 'doc' then 3 else 0 end, 2)
+from public.tariff_breaks b cross join public.zones z
+where b.version_id = '7b000000-0000-4000-8000-000000000001'
+  and exists (select 1 from public.tariff_versions where id = b.version_id and status = 'draft')
+  and not exists (select 1 from public.tariff_cells c where c.version_id = b.version_id);
+
+update public.tariff_versions set status = 'published', valid_from = '2026-01-01', published_at = now()
+where id = '7b000000-0000-4000-8000-000000000001' and status = 'draft';
+
+insert into public.tariff_versions (id, tariff_id, version, note)
+select '7b000000-0000-4000-8000-000000000002', '7a000000-0000-4000-8000-000000000001', 2, '2027 DHL rates (+3.5%, draft)'
+where not exists (select 1 from public.tariff_versions where id = '7b000000-0000-4000-8000-000000000002');
+
+insert into public.tariff_breaks (version_id, kind, to_kg, method, step_kg)
+select '7b000000-0000-4000-8000-000000000002', kind, to_kg, method, step_kg from public.tariff_breaks
+where version_id = '7b000000-0000-4000-8000-000000000001'
+  and exists (select 1 from public.tariff_versions where id = '7b000000-0000-4000-8000-000000000002' and status = 'draft')
+  and not exists (select 1 from public.tariff_breaks where version_id = '7b000000-0000-4000-8000-000000000002');
+
+insert into public.tariff_cells (version_id, kind, to_kg, zone_code, charge)
+select '7b000000-0000-4000-8000-000000000002', kind, to_kg, zone_code, round(charge * 1.035, 2) from public.tariff_cells
+where version_id = '7b000000-0000-4000-8000-000000000001'
+  and exists (select 1 from public.tariff_versions where id = '7b000000-0000-4000-8000-000000000002' and status = 'draft')
+  and not exists (select 1 from public.tariff_cells where version_id = '7b000000-0000-4000-8000-000000000002');
+
+insert into public.sales_tariffs (id, code, name, base_tariff_id) values
+  ('7c000000-0000-4000-8000-000000000001', 'STANDARD', 'Standard', '7a000000-0000-4000-8000-000000000001'),
+  ('7c000000-0000-4000-8000-000000000002', 'KEY', 'Key accounts', '7a000000-0000-4000-8000-000000000001')
+on conflict (id) do nothing;
+
+insert into public.sales_margins (sales_tariff_id, zone_code, up_to_kg, margin_pct)
+select s.id, z.code, b.up_to,
+       (case s.code when 'KEY' then 22 else 30 end) + z.sort * 0.5
+       + case when b.up_to = 0.5 then 7 when b.up_to = 5 then 4 when b.up_to = 20 then 0 else -3 end
+from public.sales_tariffs s cross join public.zones z
+cross join (values (0.5), (5.0), (20.0), (null::numeric)) as b (up_to)
+where s.id in ('7c000000-0000-4000-8000-000000000001', '7c000000-0000-4000-8000-000000000002')
+on conflict do nothing;
+
+insert into public.customer_tariffs (customer_id, effective_from, sales_tariff_id)
+select c.id, '2026-01-01',
+       case when c.account_code in ('SYD1021', 'SYD1007') then '7c000000-0000-4000-8000-000000000002'::uuid else '7c000000-0000-4000-8000-000000000001'::uuid end
 from public.customers c
-cross join public.zones z
-cross join (values ('0.5'), ('5'), ('20'), ('20+')) as b (band)
-where c.account_code in ('SYD1021', 'SYD1007', 'SYD1088')
+where c.branch_code = 'AU'
 on conflict do nothing;
 
 -- Week 44 exceptions: the seven rows on the billing feed's "Needs attention" view.

@@ -7,7 +7,9 @@ import { createClient } from '@/lib/supabase/server';
 
 // Plain-English names for the tables the audit log covers.
 const AREAS: Record<string, string> = {
-  jobs: 'Billing feed', reweighs: 'Reweighs', customers: 'Customers', customer_margins: 'Customer margins', fuel_surcharges: 'Fuel surcharge',
+  jobs: 'Billing feed', reweighs: 'Reweighs', customers: 'Customers', fuel_surcharges: 'Fuel surcharge',
+  tariff_versions: 'Rate card versions', tariff_cells: 'Rate card prices', base_tariffs: 'Rate cards', sales_tariffs: 'Sales tariffs',
+  sales_margins: 'Sales tariff margins', customer_tariffs: 'Customer tariffs',
   profiles: 'Users & roles', services: 'Services', zones: 'Zones', carriers: 'Carriers',
 };
 const IGNORE = new Set(['updated_at', 'created_at', 'held_at', 'decided_at', 'id']);
@@ -27,12 +29,16 @@ function record(e: Entry) {
   if (e.table_name === 'jobs') return String(r.connote ?? '');
   if (e.table_name === 'customers') return `${r.account_code ?? ''} ${r.name ?? ''}`.trim();
   if (e.table_name === 'fuel_surcharges') return `${r.carrier_code ?? ''} from ${r.effective_from ?? ''}`;
-  if (e.table_name === 'customer_margins') return `Zone ${r.zone_code ?? ''}, ${r.band ?? ''} kg`;
+  if (e.table_name === 'sales_margins') return `Zone ${r.zone_code ?? ''}, ${r.up_to_kg == null ? 'over' : `up to ${r.up_to_kg}`} kg`;
+  if (e.table_name === 'tariff_versions') return `Version ${r.version ?? ''}${r.status ? ` (${r.status})` : ''}`;
+  if (e.table_name === 'tariff_cells') return 'Draft rate card';
+  if (e.table_name === 'customer_tariffs') return `From ${r.effective_from ?? ''}`;
   if (e.table_name === 'profiles') return String(r.email ?? '');
   return String(r.code ?? r.name ?? e.row_id ?? '').slice(0, 40);
 }
 
 function changes(e: Entry) {
+  if (e.table_name === 'tariff_cells') return [`${e.after?.cells_changed ?? 0} prices changed${e.after?.note ? ` · ${e.after.note}` : ''}`];
   if (e.action === 'insert') return ['Created'];
   if (e.action === 'delete') return ['Deleted'];
   const keys = new Set([...Object.keys(e.before ?? {}), ...Object.keys(e.after ?? {})]);

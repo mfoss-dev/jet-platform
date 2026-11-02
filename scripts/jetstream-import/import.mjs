@@ -68,7 +68,11 @@ const BRANCH = { JETSYD: 'AU', JETAKL: 'NZ' };
 const KIND = (c) => (t(c) === 'DOX' ? 'doc' : 'parcel');            // DOX = documents; WPX and DOM = everything else
 const CARRIER = (code) => ({ DHL: 'DHL', TNT: 'TNT', FDX: 'FEDEX', AKL: 'DHL', JET: 'JET' })[code.split('.')[0]] ?? 'DHL';
 const TERMS = { '7D': 7, '14D': 14, '21D': 21, '30D': 30, '30EOM': 30, '60D': 60, EOM: 30 };
-const date = (s) => (t(s).length === 8 ? `${t(s).slice(0, 4)}-${t(s).slice(4, 6)}-${t(s).slice(6, 8)}` : null);
+// yyyymmdd to an ISO date; anything that isn't a real date (JetStream uses 99999999 for "no end") gives null.
+const date = (s) => {
+  const d = t(s).length === 8 ? `${t(s).slice(0, 4)}-${t(s).slice(4, 6)}-${t(s).slice(6, 8)}` : null;
+  return d && !Number.isNaN(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().startsWith(d) ? d : null;
+};
 const num = (v) => Number(v ?? 0);
 // Same JetStream key always gives the same id, so re-imports replace rows instead of duplicating them.
 const uid = (...k) => {

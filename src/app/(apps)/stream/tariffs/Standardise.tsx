@@ -149,7 +149,7 @@ export async function Standardise({ supabase, canEdit, branch, service, show, fr
               </table>
               <p className="hint mt8">
                 Freight only (before fuel and add-ons), at today&apos;s published rate cards, on each customer&apos;s jobs from the last 12 months. Both columns
-                count only jobs both tariffs can price; &ldquo;not priced&rdquo; jobs have no zone, rate or margin on one of them.
+                count only jobs both tariffs can price; &ldquo;not priced&rdquo; jobs have no zone, rate or margin on one of them. The imported history starts in July 2026, when JetStream began itemising freight.
               </p>
               {canEdit && preview.length > 0 && (
                 <div className="flex mt8">

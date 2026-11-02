@@ -28,7 +28,7 @@ values
   ('7e000000-0000-4000-8000-000000000006', 'AU', 'INTOUTEXP', 'PSS', 'Peak season surcharge', '2026-10-01', '2027-01-31', 'DESTCC/KG', 'W', 0.5, 0.75, 0, 'GB', 'GB', true, true, true),
   ('7e000000-0000-4000-8000-000000000007', 'AU', null, 'RAPD', 'Remote area pickup', '2026-01-01', '9999-12-31', 'ORIGPC', 'F', 0, 37, 0, '2830', '2899', false, false, true),
   ('7e000000-0000-4000-8000-000000000008', 'AU', null, 'INSUR', 'Insurance', '2026-01-01', '9999-12-31', 'INSURED', 'I', 2.5, 0, 25, null, null, false, false, true),
-  ('7e000000-0000-4000-8000-000000000009', 'AU', null, 'OSPI1', 'Overweight piece', '2026-01-01', '9999-12-31', 'PCWEIGHT', 'F', 0, 180, 0, '70', '99999', true, true, true),
+  ('7e000000-0000-4000-8000-000000000009', 'AU', null, 'OSPI1', 'Overweight piece', '2026-01-01', '9999-12-31', 'PCWEIGHT', 'F', 0, 180, 0, '70.001', '99999', true, true, true),
   ('7e000000-0000-4000-8000-000000000010', 'AU', null, 'zADHOC', 'Ad hoc charge', '2026-01-01', '9999-12-31', 'ADHOC', 'F', 0, 0, 0, null, null, false, false, false)
 on conflict (id) do nothing;
 

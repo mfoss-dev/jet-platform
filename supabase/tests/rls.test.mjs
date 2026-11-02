@@ -252,6 +252,7 @@ const run = async () => {
     const notRemote = byCode(await lines({ opc: '2000', insured: 0, pieces: [{ weight: 5, max_dim: 30 }] }));
     assert.deepEqual(Object.keys(notRemote).sort(), ['.FREIGHT', 'PSS'], 'no remote, insurance or piece add-ons when they do not apply');
     assert.equal(byCode(await lines({ date: '2026-10-27' }))['.FREIGHT'][1], 41, 'the fuel rate in force that week');
+    assert.equal(byCode(await lines({ pieces: [{ weight: 70, max_dim: 50 }] })).OSPI1, undefined, 'per-piece ranges are decimals: 70 kg is not over 70.001');
   });
   await db.query(`insert into public.addon_rules (branch_code, customer_id, service_code, code, valid_from, apply_when, percentage, add_gst) values ('AU', $1, 'INTOUTEXP', '#FUEL', '2026-01-01', 'ADD=Y', 30, true)`, [HARBOUR]);
   await as(chris, 'chris@jetworldwide.example', async () => {

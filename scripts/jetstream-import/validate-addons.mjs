@@ -49,7 +49,7 @@ for (let i = 0; i < jobs.length; i += 300) {
     const freight = (billed[t(j.ConnoteNo)] ?? []).filter((b) => b.code === '.FREIGHT').reduce((a, b) => a + b.charge, 0);
     return `(${[t(j.ConnoteNo), t(j.CustomerCode), t(j.ServiceCode), `${t(j.ShipmentDate).slice(0, 4)}-${t(j.ShipmentDate).slice(4, 6)}-${t(j.ShipmentDate).slice(6, 8)}`,
       freight, Number(j.Weight || 0), t(j.SenderCountryCode), t(j.SenderPostcode), t(j.ReceiverCountryCode), t(j.ReceiverPostcode),
-      Number(j.DeclaredValue || 0), Number(j.InsuranceValue || 0)].map(lit).join(', ')}, ${['P', 'PRI'].includes(t(j.ServiceLevel))}, ${['S', 'DTP'].includes(t(j.FreeDomicile))}, ${lit(JSON.stringify(pieces[t(j.ConnoteNo)] ?? []))}::jsonb)`;
+      Number(j.DeclaredValue || 0), Number(j.InsuranceValue || 0)].map(lit).join(', ')}, ${['P', 'PRI'].includes(t(j.ServiceLevel))}, ${['S', 'T', 'DTP'].includes(t(j.FreeDomicile))}, ${lit(JSON.stringify(pieces[t(j.ConnoteNo)] ?? []))}::jsonb)`;
   }).join(',\n');
   writeFileSync(join(here, 'out', 'validate-addons-batch.sql'), `select s.connote, l.code, l.charge, l.fuel, l.security, l.gst
 from (values ${values}) as s (connote, account, service, shipped, freight, weight, oc, op, dc, dp, declared, insured, priority, dtp, pieces)

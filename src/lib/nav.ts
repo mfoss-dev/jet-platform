@@ -77,8 +77,13 @@ export const findItem = (app: AppKey, key: string) =>
 
 export const isAppKey = (k: string): k is AppKey => k in APPS;
 
+const liveItem = (app: AppKey) => APPS[app].groups.flatMap(([, i]) => i).find((i) => i.live);
+
+// Where an app opens: its first connected screen, otherwise its first menu item.
+export const appStart = (app: AppKey) => `/${app}/${(liveItem(app) ?? APPS[app].groups[0][1][0]).key}`;
+
+// After sign-in: the first of the person's apps that has a connected screen (staff land on the billing feed).
 export function homeFor(role: Role) {
-  const app = ROLE_APPS[role][0];
-  const live = APPS[app].groups.flatMap(([, i]) => i).find((i) => i.live);
-  return `/${app}/${(live ?? APPS[app].groups[0][1][0]).key}`;
+  const apps = ROLE_APPS[role];
+  return appStart(apps.find((a) => liveItem(a)) ?? apps[0]);
 }

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { APPS, ROLE_LABEL, type AppKey, type Role } from '@/lib/nav';
+import { APPS, ROLE_LABEL, appStart, type AppKey, type Role } from '@/lib/nav';
 import { Icon } from './Icon';
 
 type Props = {
@@ -72,7 +72,6 @@ export function SideMenu({ apps, role, name, email, customerName, accountCode, b
 
   const appHasBadge = (a: AppKey) => Object.entries(badges).some(([k, n]) => k.startsWith(a + '/') && n > 0);
   const initials = name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase() || email[0]?.toUpperCase();
-  const firstPage = (a: AppKey) => `/${a}/${APPS[a].groups[0][1][0].key}`;
 
   const profileMenu = profileOpen && (
     <div className="pop" style={{ left: multi ? 72 : 16, bottom: 16 }} onClick={(e) => e.stopPropagation()}>
@@ -111,7 +110,7 @@ export function SideMenu({ apps, role, name, email, customerName, accountCode, b
                 ? <button key={a} className="rbtn on" title={APPS[a].name} onClick={toggleMenu}>
                     <Icon name={APPS[a].icon} />{APPS[a].short}{appHasBadge(a) && <span className="dot" />}
                   </button>
-                : <Link key={a} className="rbtn" title={APPS[a].name} href={firstPage(a)} onClick={() => hiddenPref && toggleMenu()}>
+                : <Link key={a} className="rbtn" title={APPS[a].name} href={appStart(a)} onClick={() => hiddenPref && toggleMenu()}>
                     <Icon name={APPS[a].icon} />{APPS[a].short}{appHasBadge(a) && <span className="dot" />}
                   </Link>
             ))}

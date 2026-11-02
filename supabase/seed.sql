@@ -17,11 +17,20 @@ insert into public.services (id, carrier_code, code, name) values
   ('5e000000-0000-4000-8000-000000000008', 'ARAMEX', 'STD', 'Aramex Standard')
 on conflict do nothing;
 
-insert into public.fuel_surcharges (carrier_code, rate_pct, effective_from) values
-  ('DHL', 41.0, '2026-10-26'), ('DHL', 42.5, '2026-11-02'),
-  ('TNT', 18.9, '2026-10-26'),
-  ('FEDEX', 39.0, '2026-10-26'), ('FEDEX', 39.5, '2026-11-02')
-on conflict do nothing;
+-- Demo add-on rules, shaped like JetStream's SalesAddOn: the freight line, weekly fuel, security, GST and a few surcharges.
+insert into public.addon_rules (id, branch_code, service_code, code, description, valid_from, valid_to, apply_when, percentage_of, percentage, fixed_fee, minimum, range_from, range_to, add_fuel, add_security, add_gst)
+values
+  ('7e000000-0000-4000-8000-000000000001', 'AU', null, '.FREIGHT', 'Freight', '2026-01-01', '9999-12-31', 'ALWAYS', 'F', 100, 0, 0, null, null, true, true, true),
+  ('7e000000-0000-4000-8000-000000000002', 'AU', 'INTOUTEXP', '#FUEL', 'Fuel surcharge', '2026-10-26', '2026-11-01', 'ADD=Y', null, 41.0, 0, 0, null, null, false, false, true),
+  ('7e000000-0000-4000-8000-000000000003', 'AU', 'INTOUTEXP', '#FUEL', 'Fuel surcharge', '2026-11-02', '9999-12-31', 'ADD=Y', null, 42.5, 0, 0, null, null, false, false, true),
+  ('7e000000-0000-4000-8000-000000000004', 'AU', null, '#SEC', 'Security surcharge', '2026-01-01', '9999-12-31', 'ADD=Y', null, 2, 0, 0, null, null, false, false, true),
+  ('7e000000-0000-4000-8000-000000000005', 'AU', null, '#GST', 'GST', '2026-01-01', '9999-12-31', 'ADD=Y', null, 10, 0, 0, null, null, false, false, false),
+  ('7e000000-0000-4000-8000-000000000006', 'AU', 'INTOUTEXP', 'PSS', 'Peak season surcharge', '2026-10-01', '2027-01-31', 'DESTCC/KG', 'W', 0.5, 0.75, 0, 'GB', 'GB', true, true, true),
+  ('7e000000-0000-4000-8000-000000000007', 'AU', null, 'RAPD', 'Remote area pickup', '2026-01-01', '9999-12-31', 'ORIGPC', 'F', 0, 37, 0, '2830', '2899', false, false, true),
+  ('7e000000-0000-4000-8000-000000000008', 'AU', null, 'INSUR', 'Insurance', '2026-01-01', '9999-12-31', 'INSURED', 'I', 2.5, 0, 25, null, null, false, false, true),
+  ('7e000000-0000-4000-8000-000000000009', 'AU', null, 'OSPI1', 'Overweight piece', '2026-01-01', '9999-12-31', 'PCWEIGHT', 'F', 0, 180, 0, '70', '99999', true, true, true),
+  ('7e000000-0000-4000-8000-000000000010', 'AU', null, 'zADHOC', 'Ad hoc charge', '2026-01-01', '9999-12-31', 'ADHOC', 'F', 0, 0, 0, null, null, false, false, false)
+on conflict (id) do nothing;
 
 insert into public.customers (id, account_code, name, branch_code, status, payment_terms_days, billing_email, hold_reason, hold_note) values
   ('c0000000-0000-4000-8000-000000000001', 'SYD1021', 'Harbour Optics', 'AU', 'active', 14, 'accounts@harbouroptics.example', null, null),

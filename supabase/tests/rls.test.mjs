@@ -235,6 +235,36 @@ const run = async () => {
     });
   }
   results.push('  ✓ drafts edit by row, by % or by delete (one audit entry each); published locked; management publishes; right version by date; staff only');
+
+  // ---- add-ons (JetStream's GetSalesAddons / GetPieceLevelSalesAddons)
+  const lines = async (args) => (await db.query(
+    `select code, charge::float, fuel::float, security::float, gst::float, per_piece from public.charge_lines($1, 'INTOUTEXP', $2::date, $3, $4, 'AU', $5, 'GB', 'SW1A', 0, $6, false, false, $7::jsonb)`,
+    [HARBOUR, args.date ?? '2026-11-10', args.freight ?? 100, args.weight ?? 3.2, args.opc ?? '2830', args.insured ?? 1000, JSON.stringify(args.pieces ?? [{ weight: 80, max_dim: 50 }])])).rows;
+  const byCode = (rows) => Object.fromEntries(rows.map((r) => [r.code, [r.charge, r.fuel, r.security, r.gst]]));
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    const l = byCode(await lines({}));
+    assert.deepEqual(l['.FREIGHT'], [100, 42.5, 2, 14.45], 'freight line: fuel 42.5%, security 2%, GST 10% on all three');
+    assert.deepEqual(l.INSUR, [25, 0, 0, 2.5], 'insurance: 2.5% of insured value, minimum $25');
+    assert.deepEqual(l.PSS, [5.25, 2.23, 0.11, 0.76], 'peak surcharge: 7 half-kilos at $0.75 (3.2 kg), plus fuel, security, GST');
+    assert.deepEqual(l.RAPD, [37, 0, 0, 3.7], 'remote pickup from postcode 2830');
+    assert.deepEqual(l.OSPI1, [180, 76.5, 3.6, 18], 'overweight piece: GST on the fee only, as JetStream does');
+    assert.equal(l.zADHOC, undefined, 'ad hoc codes are never automatic');
+    const notRemote = byCode(await lines({ opc: '2000', insured: 0, pieces: [{ weight: 5, max_dim: 30 }] }));
+    assert.deepEqual(Object.keys(notRemote).sort(), ['.FREIGHT', 'PSS'], 'no remote, insurance or piece add-ons when they do not apply');
+    assert.equal(byCode(await lines({ date: '2026-10-27' }))['.FREIGHT'][1], 41, 'the fuel rate in force that week');
+  });
+  await db.query(`insert into public.addon_rules (branch_code, customer_id, service_code, code, valid_from, apply_when, percentage, add_gst) values ('AU', $1, 'INTOUTEXP', '#FUEL', '2026-01-01', 'ADD=Y', 30, true)`, [HARBOUR]);
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    assert.equal(byCode(await lines({}))['.FREIGHT'][1], 30, "a customer's own fuel rate wins over the general one");
+    assert.equal(Number((await one(`select fuel_pct from public.price_shipment($1, 'INTOUTEXP', 'AU', '2000', 'GB', '', 'parcel', 3.2, '2026-11-10')`, [HARBOUR])).fuel_pct), 30);
+  });
+  await db.query(`delete from public.addon_rules where customer_id is not null`);
+  for (const [id, email] of [[sam, 'sam@jetworldwide.example'], [priya, 'priya@harbouroptics.example']]) {
+    await as(id, email, async () => {
+      assert.equal(Number((await one('select count(*) from public.addon_rules')).count), 0, `${email} must not see add-on rules`);
+    });
+  }
+  results.push('  ✓ add-ons follow JetStream: freight line, fuel/security/GST, % / per-kg / per-piece rules, postcode conditions, weekly and customer fuel rates');
 };
 
 try {

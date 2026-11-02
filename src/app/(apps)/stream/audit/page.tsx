@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/server';
 
 // Plain-English names for the tables the audit log covers.
 const AREAS: Record<string, string> = {
-  jobs: 'Billing feed', reweighs: 'Reweighs', customers: 'Customers', fuel_surcharges: 'Fuel surcharge',
+  jobs: 'Billing feed', reweighs: 'Reweighs', customers: 'Customers', addon_rules: 'Fuel & add-ons',
   tariff_versions: 'Rate card versions', tariff_rates: 'Rate card prices', zone_sets: 'Zone guides', import: 'Imports', base_tariffs: 'Rate cards', sales_tariffs: 'Sales tariffs',
   sales_margins: 'Sales tariff margins', customer_tariffs: 'Customer tariffs',
   profiles: 'Users & roles', services: 'Services', zones: 'Zones', carriers: 'Carriers',
@@ -28,7 +28,7 @@ function record(e: Entry) {
   const r = e.after ?? e.before ?? {};
   if (e.table_name === 'jobs') return String(r.connote ?? '');
   if (e.table_name === 'customers') return `${r.account_code ?? ''} ${r.name ?? ''}`.trim();
-  if (e.table_name === 'fuel_surcharges') return `${r.carrier_code ?? ''} from ${r.effective_from ?? ''}`;
+  if (e.table_name === 'addon_rules') return `${r.code ?? ''} · ${r.branch_code ?? ''} ${r.service_code ?? 'all services'} from ${r.valid_from ?? ''}`;
   if (e.table_name === 'sales_margins') return 'Sales tariff margins';
   if (e.table_name === 'tariff_versions') return `Version ${r.version ?? ''}${r.status ? ` (${r.status})` : ''}`;
   if (e.table_name === 'tariff_rates') return 'Draft rate card';

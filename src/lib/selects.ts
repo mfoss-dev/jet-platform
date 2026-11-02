@@ -23,7 +23,7 @@ export const SELECTS = {
   openJobs: { table: 'job_list', select: 'customer_id' },
   customerJobs: { table: 'job_list', select: 'id, connote, booked_at, carrier_code, dest_city, sell_ex_gst, billing_status, issue' },
   history: { table: 'audit_log', select: 'id, at, actor_email, action, before, after' },
-  fuel: { table: 'fuel_surcharges', select: 'id, carrier_code, rate_pct, effective_from, created_at, carrier:carriers(name)' },
+  addonRules: { table: 'addon_rules', select: 'id, branch_code, customer_id, service_code, code, description, valid_from, valid_to, apply_when, percentage_of, percentage, fixed_fee, minimum, range_from, range_to, add_fuel, add_security, add_gst, source, customer:customers(name, account_code)' },
   carriers: { table: 'carriers', select: 'code, name' },
   branches: { table: 'branches', select: 'code, name' },
   services: { table: 'services', select: 'id, carrier_code, code, name' },

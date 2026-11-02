@@ -6,36 +6,93 @@ import { createClient } from '@/lib/supabase/server';
 
 const back = (query: string, msg: string): never => redirect(`/stream/tariffs?${query}&msg=${encodeURIComponent(msg)}`);
 
-// ---------------------------------------------------------------- fuel
+// ---------------------------------------------------------------- fuel and add-ons
 
-// Schedule (or correct) a carrier's fuel surcharge from a date. Same carrier and date replaces the earlier entry.
+const dayBefore = (d: string) => new Date(new Date(`${d}T00:00:00Z`).getTime() - 864e5).toISOString().slice(0, 10);
+
+// Set the fuel surcharge for a branch and service from a date (JetStream's #FUEL rule). The general rate running at that
+// date is closed the day before, so exactly one general rate applies on any day.
 export async function scheduleFuel(formData: FormData) {
-  const carrier = String(formData.get('carrier_code') ?? '');
+  const branch = String(formData.get('branch_code') ?? '');
+  const service = String(formData.get('service_code') ?? '');
   const rate = Number(formData.get('rate_pct'));
-  const from = String(formData.get('effective_from') ?? '');
-  if (!carrier || !/^\d{4}-\d{2}-\d{2}$/.test(from)) back('tab=fuel', 'Choose a carrier and a start date.');
+  const from = String(formData.get('valid_from') ?? '');
+  if (!branch || !service || !/^\d{4}-\d{2}-\d{2}$/.test(from)) back('tab=fuel', 'Choose a branch, a service and a start date.');
   if (!Number.isFinite(rate) || rate < 0 || rate > 100) back('tab=fuel', 'The rate must be between 0% and 100%.');
-
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from('fuel_surcharges')
-    .upsert({ carrier_code: carrier, rate_pct: rate, effective_from: from }, { onConflict: 'carrier_code,effective_from' })
-    .select('id');
+  const { data: open } = await supabase.from('addon_rules').select('id, valid_from')
+    .eq('branch_code', branch).eq('service_code', service).eq('code', '#FUEL').is('customer_id', null).lte('valid_from', from).gte('valid_to', from);
+  for (const r of open ?? []) {
+    if (r.valid_from === from) await supabase.from('addon_rules').delete().eq('id', r.id);
+    else await supabase.from('addon_rules').update({ valid_to: dayBefore(from) }).eq('id', r.id);
+  }
+  const { data: later } = await supabase.from('addon_rules').select('valid_from')
+    .eq('branch_code', branch).eq('service_code', service).eq('code', '#FUEL').is('customer_id', null).gt('valid_from', from).order('valid_from').limit(1);
+  const { data, error } = await supabase.from('addon_rules').insert({
+    branch_code: branch, service_code: service, code: '#FUEL', description: 'Fuel surcharge', valid_from: from,
+    valid_to: later?.[0] ? dayBefore(later[0].valid_from) : '9999-12-31', apply_when: 'ADD=Y', percentage: rate, add_gst: true,
+  }).select('id');
   revalidatePath('/stream/tariffs');
   if (error) back('tab=fuel', `Not saved: ${error.message}`);
-  if (!data?.length) back('tab=fuel', 'Not saved: you don’t have permission to change fuel surcharges.');
-  back('tab=fuel', `${carrier} fuel set to ${rate}% from ${from} · logged`);
+  if (!data?.length) back('tab=fuel', 'Not saved: you don’t have permission to change fuel.');
+  back('tab=fuel', `${service} fuel (${branch}) set to ${rate}% from ${from} · logged`);
 }
 
-// Only changes that haven't started yet can be withdrawn; past rates stay as the record of what was charged.
+// Withdraw a fuel rate that hasn't started; the rate before it carries on.
 export async function cancelFuel(formData: FormData) {
   const id = String(formData.get('id'));
   const today = new Date().toISOString().slice(0, 10);
   const supabase = await createClient();
-  const { data, error } = await supabase.from('fuel_surcharges').delete().eq('id', id).gt('effective_from', today).select('id');
+  const { data: r } = await supabase.from('addon_rules').select('branch_code, service_code, valid_from, valid_to').eq('id', id).single();
+  const { data, error } = await supabase.from('addon_rules').delete().eq('id', id).eq('code', '#FUEL').gt('valid_from', today).select('id');
+  if (error || !data?.length) back('tab=fuel', `Not cancelled: ${error?.message ?? 'only future rates can be withdrawn'}`);
+  if (r) {
+    await supabase.from('addon_rules').update({ valid_to: r.valid_to }).eq('branch_code', r.branch_code).eq('service_code', r.service_code)
+      .eq('code', '#FUEL').is('customer_id', null).eq('valid_to', dayBefore(r.valid_from));
+  }
   revalidatePath('/stream/tariffs');
-  if (error) back('tab=fuel', `Not cancelled: ${error.message}`);
-  back('tab=fuel', data?.length ? 'Scheduled change cancelled · logged' : 'Not cancelled: only future changes can be withdrawn.');
+  back('tab=fuel', 'Scheduled fuel rate withdrawn · logged');
+}
+
+const APPLY_WHEN = ['ALWAYS', 'INSURED', 'PRIORITY', 'DTP', 'DESTPC', 'ORIGPC', 'DESTCC', 'DESTCC/KG', 'ORIGCC/KG', 'DESTPC/KG', 'ORIGPC/KG',
+  'DESTCCPC', 'ORIGCCPC', 'DESTCC.PC', 'ORIGCC.PC', 'VALUE', 'TLWEIGHT', 'LAST', 'PCWEIGHT', 'PCDIM', 'MANUAL', 'ADHOC'];
+
+// Create or update an add-on rule. Changing a rule's price from a date is done by ending it and adding a new one,
+// so past jobs keep the price they were charged.
+export async function saveAddon(formData: FormData) {
+  const id = String(formData.get('id') ?? '');
+  const f = (k: string) => String(formData.get(k) ?? '').trim();
+  const row = {
+    branch_code: f('branch_code'), service_code: f('service_code') || null, code: f('code').toUpperCase().replace(/^Z/, 'z'), description: f('description'),
+    valid_from: f('valid_from'), valid_to: f('valid_to') || '9999-12-31', apply_when: f('apply_when').toUpperCase(), percentage_of: f('percentage_of') || null,
+    percentage: Number(f('percentage') || 0), fixed_fee: Number(f('fixed_fee') || 0), minimum: Number(f('minimum') || 0),
+    range_from: f('range_from') || null, range_to: f('range_to') || null,
+    add_fuel: formData.get('add_fuel') === 'on', add_security: formData.get('add_security') === 'on', add_gst: formData.get('add_gst') === 'on',
+  };
+  const q = `tab=addons${id ? `&addon=${id}` : ''}`;
+  if (!row.code || !row.branch_code || !/^\d{4}-\d{2}-\d{2}$/.test(row.valid_from) || !APPLY_WHEN.includes(row.apply_when)) {
+    back(q, 'Give the add-on a code, branch, start date and when it applies.');
+  }
+  if ([row.percentage, row.fixed_fee, row.minimum].some((n) => !Number.isFinite(n))) back(q, 'Percent, fee and minimum must be numbers.');
+  const supabase = await createClient();
+  const { data, error } = id
+    ? await supabase.from('addon_rules').update(row).eq('id', id).select('id')
+    : await supabase.from('addon_rules').insert(row).select('id');
+  revalidatePath('/stream/tariffs');
+  if (error) back(q, `Not saved: ${error.message}`);
+  if (!data?.length) back(q, 'Not saved: you don’t have permission to change add-ons.');
+  back(`tab=addons&addon=${data![0].id}`, `Add-on ${row.code} saved · logged`);
+}
+
+export async function endAddon(formData: FormData) {
+  const id = String(formData.get('id'));
+  const to = String(formData.get('valid_to') ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) back(`tab=addons&addon=${id}`, 'Choose the last day the add-on applies.');
+  const supabase = await createClient();
+  const { data, error } = await supabase.from('addon_rules').update({ valid_to: to }).eq('id', id).select('id');
+  revalidatePath('/stream/tariffs');
+  if (error || !data?.length) back(`tab=addons&addon=${id}`, `Not saved: ${error?.message ?? 'no permission'}`);
+  back(`tab=addons&addon=${id}`, `Add-on ends on ${to} · logged`);
 }
 
 // ---------------------------------------------------------------- rate cards

@@ -6,7 +6,9 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
 export type PriceParams = {
   customer: string; service: string; ocountry: string; opost: string; dcountry: string; dpost: string;
   kind: string; weight: string; l: string; w: string; h: string; date: string; zone: string;
+  insured: string; declared: string; priority: string; dtp: string;
 };
+type Line = { code: string; description: string; charge: number; fuel: number; security: number; gst: number };
 type Priced = {
   sales_tariff: string | null; base_tariff: string | null; version: number | null; zone_code: string | null;
   volumetric_divisor: number | null; price: number | null; fuel_pct: number | null; problem: string | null;
@@ -42,7 +44,21 @@ export async function PriceCheck({ supabase, params: p }: { supabase: Supabase; 
       if (cubic > actual) { chargeable = cubic; ({ row: result, error } = await call(cubic)); }
     }
   }
-  const fuel = result?.price != null && result.fuel_pct != null ? Math.round(Number(result.price) * Number(result.fuel_pct)) / 100 : null;
+  // The full charge: the freight line and every add-on, with fuel, security and GST, as it would be invoiced.
+  let lines: Line[] = [];
+  if (result?.price != null) {
+    const { data } = await supabase.rpc('charge_lines', {
+      p_customer: p.customer, p_service: p.service, p_date: p.date || today, p_freight: Number(result.price), p_weight: chargeable,
+      p_orig_country: p.ocountry || 'AU', p_orig_postcode: p.opost, p_dest_country: p.dcountry || 'AU', p_dest_postcode: p.dpost,
+      p_declared: Number(p.declared) || 0, p_insured: Number(p.insured) || 0, p_priority: p.priority === 'on', p_dtp: p.dtp === 'on',
+      p_pieces: [{ weight: actual, max_dim: Math.max(0, ...dims.filter((d) => d > 0)) }],
+    });
+    lines = ((data ?? []) as Line[]).map((l) => ({ ...l, charge: Number(l.charge), fuel: Number(l.fuel), security: Number(l.security), gst: Number(l.gst) }))
+      .filter((l) => l.charge || l.fuel || l.security || l.gst);
+    if (!lines.some((l) => l.code === '.FREIGHT')) lines.unshift({ code: '.FREIGHT', description: 'Freight', charge: Number(result.price), fuel: 0, security: 0, gst: 0 });
+  }
+  const exGst = lines.reduce((a, l) => a + l.charge + l.fuel + l.security, 0);
+  const gst = lines.reduce((a, l) => a + l.gst, 0);
   const isIntl = p.service.startsWith('INT');
 
   return (
@@ -82,6 +98,12 @@ export async function PriceCheck({ supabase, params: p }: { supabase: Supabase; 
             </div>
           </div>
           <div><label htmlFor="pc-date">Booking date</label><input id="pc-date" name="date" type="date" defaultValue={p.date || today} /></div>
+          <div><label htmlFor="pc-ins">Insured value $</label><input id="pc-ins" name="insured" defaultValue={p.insured} inputMode="decimal" placeholder="0" /></div>
+          <div><label htmlFor="pc-dec">Declared value $</label><input id="pc-dec" name="declared" defaultValue={p.declared} inputMode="decimal" placeholder="0" /></div>
+          <div className="s2 flex">
+            <label style={{ margin: 0 }}><input type="checkbox" name="priority" defaultChecked={p.priority === 'on'} /> Priority</label>
+            <label style={{ margin: 0 }}><input type="checkbox" name="dtp" defaultChecked={p.dtp === 'on'} /> Duties and taxes paid by sender</label>
+          </div>
           <div><label htmlFor="pc-zone">Zone (optional override)</label><input id="pc-zone" name="zone" defaultValue={p.zone} placeholder="found from postcodes" /></div>
           <div><button className="btn primary">Check price</button></div>
         </form>
@@ -101,11 +123,23 @@ export async function PriceCheck({ supabase, params: p }: { supabase: Supabase; 
                 <tr><td>Rate card</td><td className="r">{result.base_tariff ?? '—'}{result.version ? ` · version ${result.version}` : ''}</td></tr>
                 <tr><td>Zone</td><td className="r">{result.zone_code ?? '—'}</td></tr>
                 <tr><td>Chargeable weight</td><td className="r">{chargeable} kg{cubic != null ? ` (cubic ${cubic} kg at ÷${result.volumetric_divisor})` : ''}</td></tr>
-                <tr><td><b>Freight (ex GST)</b></td><td className="r"><b>{money(result.price)}</b></td></tr>
-                <tr><td>Fuel surcharge {result.fuel_pct != null ? `(${result.fuel_pct}%)` : ''}</td><td className="r">{money(fuel)}</td></tr>
-                <tr><td>Freight + fuel (ex GST)</td><td className="r">{result.price != null ? money(Number(result.price) + (fuel ?? 0)) : '—'}</td></tr>
+                <tr><td>Freight</td><td className="r">{money(result.price)}</td></tr>
+                <tr><td>Fuel rate</td><td className="r">{result.fuel_pct != null ? `${result.fuel_pct}%` : <span className="hint">not set for this date</span>}</td></tr>
               </tbody>
             </table>
+            {lines.length > 0 && (
+              <table className="mt">
+                <thead><tr><th>Line</th><th className="r">Charge</th><th className="r">Fuel</th><th className="r">Security</th><th className="r">GST</th></tr></thead>
+                <tbody>
+                  {lines.map((l, i) => (
+                    <tr key={`${l.code}-${i}`}><td>{l.description || l.code} <span className="hint">{l.code}</span></td><td className="r">{money(l.charge)}</td>
+                      <td className="r">{l.fuel ? money(l.fuel) : '—'}</td><td className="r">{l.security ? money(l.security) : '—'}</td><td className="r">{l.gst ? money(l.gst) : '—'}</td></tr>
+                  ))}
+                  <tr><td><b>Total ex GST</b></td><td className="r" colSpan={3}><b>{money(exGst)}</b></td><td className="r">{money(gst)}</td></tr>
+                  <tr><td><b>Total inc GST</b></td><td className="r" colSpan={4}><b>{money(exGst + gst)}</b></td></tr>
+                </tbody>
+              </table>
+            )}
           </>
         )}
       </div>

@@ -213,7 +213,18 @@ const run = async () => {
       assert.equal((await one(`select problem from public.price_shipment($1, '6', 'parcel', 3.2)`, [HARBOUR])).problem, 'The customer has no sales tariff on this date');
     });
   }
-  results.push('  ✓ published rate cards are locked; finance edits drafts (one audit entry), management publishes; right version by date; rates staff only');
+  await as(monica, 'monica@jetworldwide.example', async () => {
+    const v = (await one(`select public.create_rate_card('TNT-ROAD-AU', 'TNT Road (Sydney)', 'AU', 'TNT', null, $1) as id`, [V1])).id;
+    const t = await one(`select v.status, v.version, b.code from public.tariff_versions v join public.base_tariffs b on b.id = v.tariff_id where v.id = $1`, [v]);
+    assert.deepEqual([t.status, t.version, t.code], ['draft', 1, 'TNT-ROAD-AU']);
+    assert.equal(Number((await one(`select count(*) from public.tariff_cells where version_id = $1`, [v])).count), Number((await one(`select count(*) from public.tariff_cells where version_id = $1`, [V1])).count), 'copied with its prices');
+    const blank = (await one(`select public.create_rate_card('FEDEX-IP-AU', 'FedEx IP', 'AU', 'FEDEX') as id`)).id;
+    assert.equal(Number((await one(`select count(*) from public.tariff_breaks where version_id = $1`, [blank])).count), 0);
+  });
+  await as(sam, 'sam@jetworldwide.example', async () => {
+    await assert.rejects(db.query(`select public.create_rate_card('X', 'X', 'AU', 'DHL')`), /Only finance and management/);
+  });
+  results.push('  ✓ new rate cards start as drafts (blank or copied); published rate cards are locked; finance edits drafts (one audit entry), management publishes; right version by date; rates staff only');
 };
 
 try {

@@ -25,6 +25,8 @@ export const SELECTS = {
   history: { table: 'audit_log', select: 'id, at, actor_email, action, before, after' },
   fuel: { table: 'fuel_surcharges', select: 'id, carrier_code, rate_pct, effective_from, created_at, carrier:carriers(name)' },
   carriers: { table: 'carriers', select: 'code, name' },
+  branches: { table: 'branches', select: 'code, name' },
+  services: { table: 'services', select: 'id, carrier_code, code, name' },
   zones: { table: 'zones', select: 'code, name, sort' },
   baseTariffs: { table: 'base_tariffs', select: 'id, code, name, carrier_code, branch_code' },
   tariffVersions: { table: 'tariff_versions', select: 'id, tariff_id, version, status, valid_from, note, published_at, publisher:profiles!tariff_versions_published_by_fkey(full_name)' },

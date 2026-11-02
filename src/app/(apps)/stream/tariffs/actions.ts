@@ -131,3 +131,22 @@ export async function createSalesTariff(formData: FormData) {
   revalidatePath('/stream/tariffs');
   back(`tab=sales&sales=${data!.id}`, `Sales tariff ${code} created · logged`);
 }
+
+// A new rate card starts as a draft (version 1), blank or copied from another card's version.
+export async function createRateCard(formData: FormData) {
+  const code = String(formData.get('code') ?? '').trim().toUpperCase();
+  const name = String(formData.get('name') ?? '').trim();
+  const carrier = String(formData.get('carrier_code') ?? '');
+  const branch = String(formData.get('branch_code') ?? '');
+  const service = String(formData.get('service_id') ?? '') || null;
+  const copy = String(formData.get('copy_version') ?? '') || null;
+  if (!/^[A-Z0-9-]{2,24}$/.test(code) || !name || !carrier || !branch) back('tab=rates', 'Give the rate card a code (letters, numbers, dashes), a name, a carrier and a branch.');
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc('create_rate_card', {
+    p_code: code, p_name: name, p_branch: branch, p_carrier: carrier, p_service: service, p_copy_version: copy,
+  });
+  revalidatePath('/stream/tariffs');
+  if (error) back('tab=rates', `Not created: ${error.message.includes('duplicate') ? `the code ${code} is already used` : error.message}`);
+  const { data: v } = await supabase.from('tariff_versions').select('tariff_id').eq('id', data as string).single();
+  back(`tab=rates&tariff=${v?.tariff_id}&version=${data}`, `Rate card ${code} created as a draft. Fill in the prices, then publish it.`);
+}

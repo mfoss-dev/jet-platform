@@ -41,7 +41,7 @@ update public.customers set held_at = now() where status = 'on_hold' and held_at
 -- Demo tariffs, shaped like JetStream's: a DHL Express rate card (zone x weight break), a published version
 -- from 1 Jan 2026 and a 2027 draft at +3.5%, two sales tariffs (margin by zone and weight band) and customer assignments.
 insert into public.base_tariffs (id, code, name, branch_code, carrier_code, service_id) values
-  ('7a000000-0000-4000-8000-000000000001', 'DHL-WPX-AU', 'DHL Express Worldwide (Sydney)', 'AU', 'DHL', '5e000000-0000-4000-8000-000000000001')
+  ('7a000000-0000-4000-8000-000000000001', 'DHL-WPX-AU', 'DHL Express Worldwide (Sydney) (demo)', 'AU', 'DHL', '5e000000-0000-4000-8000-000000000001')
 on conflict (id) do nothing;
 
 insert into public.tariff_versions (id, tariff_id, version, note) values
@@ -90,9 +90,33 @@ where version_id = '7b000000-0000-4000-8000-000000000001'
   and exists (select 1 from public.tariff_versions where id = '7b000000-0000-4000-8000-000000000002' and status = 'draft')
   and not exists (select 1 from public.tariff_cells where version_id = '7b000000-0000-4000-8000-000000000002');
 
+-- A second demo rate card: DHL Economy Select, same weight breaks at 82% of the Express prices.
+insert into public.base_tariffs (id, code, name, branch_code, carrier_code, service_id) values
+  ('7a000000-0000-4000-8000-000000000002', 'DHL-ESU-AU', 'DHL Economy Select (Sydney) (demo)', 'AU', 'DHL', '5e000000-0000-4000-8000-000000000002')
+on conflict (id) do nothing;
+
+insert into public.tariff_versions (id, tariff_id, version, note) values
+  ('7b000000-0000-4000-8000-000000000011', '7a000000-0000-4000-8000-000000000002', 1, '2026 DHL Economy rates')
+on conflict (id) do nothing;
+
+insert into public.tariff_breaks (version_id, kind, to_kg, method, step_kg)
+select '7b000000-0000-4000-8000-000000000011', kind, to_kg, method, step_kg from public.tariff_breaks
+where version_id = '7b000000-0000-4000-8000-000000000001' and kind = 'parcel'
+  and exists (select 1 from public.tariff_versions where id = '7b000000-0000-4000-8000-000000000011' and status = 'draft')
+  and not exists (select 1 from public.tariff_breaks where version_id = '7b000000-0000-4000-8000-000000000011');
+
+insert into public.tariff_cells (version_id, kind, to_kg, zone_code, charge)
+select '7b000000-0000-4000-8000-000000000011', kind, to_kg, zone_code, round(charge * 0.82, 2) from public.tariff_cells
+where version_id = '7b000000-0000-4000-8000-000000000001' and kind = 'parcel'
+  and exists (select 1 from public.tariff_versions where id = '7b000000-0000-4000-8000-000000000011' and status = 'draft')
+  and not exists (select 1 from public.tariff_cells where version_id = '7b000000-0000-4000-8000-000000000011');
+
+update public.tariff_versions set status = 'published', valid_from = '2026-01-01', published_at = now()
+where id = '7b000000-0000-4000-8000-000000000011' and status = 'draft';
+
 insert into public.sales_tariffs (id, code, name, base_tariff_id) values
-  ('7c000000-0000-4000-8000-000000000001', 'STANDARD', 'Standard', '7a000000-0000-4000-8000-000000000001'),
-  ('7c000000-0000-4000-8000-000000000002', 'KEY', 'Key accounts', '7a000000-0000-4000-8000-000000000001')
+  ('7c000000-0000-4000-8000-000000000001', 'STANDARD', 'Standard (demo)', '7a000000-0000-4000-8000-000000000001'),
+  ('7c000000-0000-4000-8000-000000000002', 'KEY', 'Key accounts (demo)', '7a000000-0000-4000-8000-000000000001')
 on conflict (id) do nothing;
 
 insert into public.sales_margins (sales_tariff_id, zone_code, up_to_kg, margin_pct)

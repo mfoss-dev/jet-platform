@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { day, one } from '@/lib/format';
 import { SELECTS } from '@/lib/selects';
 import type { createClient } from '@/lib/supabase/server';
-import { deleteDraft, newDraft, publishVersion } from './actions';
+import { createRateCard, deleteDraft, newDraft, publishVersion } from './actions';
 import { TariffGrid, type GridBreak } from './TariffGrid';
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -25,12 +25,58 @@ async function loadGrid(supabase: Supabase, versionId: string) {
 export async function RateCards({ supabase, canEdit, canPublish, tariffId, versionId }: {
   supabase: Supabase; canEdit: boolean; canPublish: boolean; tariffId: string; versionId: string;
 }) {
-  const [{ data: tariffs }, { data: zones }] = await Promise.all([
+  const [{ data: tariffs }, { data: zones }, { data: carriers }, { data: branches }, { data: services }, { data: allVersions }] = await Promise.all([
     supabase.from(SELECTS.baseTariffs.table).select(SELECTS.baseTariffs.select).order('code'),
     supabase.from(SELECTS.zones.table).select(SELECTS.zones.select).order('sort'),
+    supabase.from(SELECTS.carriers.table).select(SELECTS.carriers.select).eq('active', true).order('name'),
+    supabase.from(SELECTS.branches.table).select(SELECTS.branches.select).order('code'),
+    supabase.from(SELECTS.services.table).select(SELECTS.services.select).eq('active', true).order('name'),
+    supabase.from(SELECTS.tariffVersions.table).select(SELECTS.tariffVersions.select).eq('status', 'published').order('valid_from', { ascending: false }),
   ]);
+  // "Start from a copy of": each card's newest published version.
+  const copyFrom = (tariffs ?? []).flatMap((t) => {
+    const v = (allVersions ?? []).find((x) => x.tariff_id === t.id);
+    return v ? [{ id: v.id, label: `${t.name} (version ${v.version})` }] : [];
+  });
+  const newCard = canEdit && (
+    <details className="card">
+      <summary style={{ cursor: 'pointer', fontWeight: 600 }}>+ New rate card</summary>
+      <form action={createRateCard} className="form mt8" style={{ gridTemplateColumns: '1fr' }}>
+        <div><label htmlFor="rc-code">Code</label><input id="rc-code" name="code" placeholder="e.g. TNT-ROAD-AU" required /></div>
+        <div><label htmlFor="rc-name">Name</label><input id="rc-name" name="name" placeholder="e.g. TNT Road (Sydney)" required /></div>
+        <div>
+          <label htmlFor="rc-carrier">Carrier</label>
+          <select id="rc-carrier" name="carrier_code" className="f" required>{(carriers ?? []).map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}</select>
+        </div>
+        <div>
+          <label htmlFor="rc-service">Service (optional)</label>
+          <select id="rc-service" name="service_id" className="f" defaultValue="">
+            <option value="">Any service</option>
+            {(services ?? []).map((sv) => <option key={sv.id} value={sv.id}>{sv.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="rc-branch">Branch</label>
+          <select id="rc-branch" name="branch_code" className="f" required>{(branches ?? []).map((b) => <option key={b.code} value={b.code}>{b.name} ({b.code})</option>)}</select>
+        </div>
+        <div>
+          <label htmlFor="rc-copy">Start from</label>
+          <select id="rc-copy" name="copy_version" className="f" defaultValue="">
+            <option value="">Blank (add your own weight breaks)</option>
+            {copyFrom.map((c) => <option key={c.id} value={c.id}>A copy of {c.label}</option>)}
+          </select>
+        </div>
+        <div><button className="btn primary">Create draft</button></div>
+      </form>
+    </details>
+  );
   if (!tariffs?.length) {
-    return <div className="card"><h3>No rate cards yet</h3><p className="hint">Jet&apos;s rate cards will be imported from Wayne&apos;s JetStream (BaseTariff tables).</p></div>;
+    return (
+      <div className="grid" style={{ gridTemplateColumns: 'minmax(220px, 320px) 1fr', alignItems: 'start' }}>
+        {newCard}
+        <div className="card"><h3>No rate cards yet</h3><p className="hint">Jet&apos;s rate cards will be imported from Wayne&apos;s JetStream (BaseTariff tables), or create one here.</p></div>
+      </div>
+    );
   }
   const tariff = tariffs.find((t) => t.id === tariffId) ?? tariffs[0];
   const { data: vdata } = await supabase.from(SELECTS.tariffVersions.table).select(SELECTS.tariffVersions.select).eq('tariff_id', tariff.id).order('version', { ascending: false });
@@ -55,7 +101,7 @@ export async function RateCards({ supabase, canEdit, canPublish, tariffId, versi
     <div className="grid" style={{ gridTemplateColumns: 'minmax(220px, 280px) 1fr', alignItems: 'start' }}>
       <div className="grid">
         <div className="card">
-          <h3>Rate cards</h3>
+          <h3>Rate cards ({tariffs.length})</h3>
           {tariffs.map((t) => (
             <div key={t.id}>
               <Link href={{ pathname: '/stream/tariffs', query: { tab: 'rates', tariff: t.id } }} scroll={false}>
@@ -65,6 +111,7 @@ export async function RateCards({ supabase, canEdit, canPublish, tariffId, versi
             </div>
           ))}
         </div>
+        {newCard}
         <div className="card">
           <h3>Versions</h3>
           <table>

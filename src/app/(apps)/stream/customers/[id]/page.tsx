@@ -118,8 +118,8 @@ export default async function CustomerDetail({ params, searchParams }: PageProps
         <h3>Rates</h3>
         <p>
           Sales tariff: <b>{currentTariff?.sales?.name ?? 'none'}</b>
-          {currentTariff ? <span className="hint"> · since {day(currentTariff.effective_from)} · </span> : ' · '}
-          <Link href={{ pathname: '/stream/tariffs', query: { tab: 'price', customer: c.id } }}>Price check</Link>
+          {currentTariff ? <span className="hint"> · since {day(currentTariff.effective_from)} </span> : ' '}
+          <Link className="btn sm" href={{ pathname: '/stream/tariffs', query: { tab: 'price', customer: c.id } }}>Price check</Link>
         </p>
         {tariffRows.some((t) => t.effective_from > today) && (
           <p className="hint">Scheduled: {tariffRows.filter((t) => t.effective_from > today).map((t) => `${t.sales?.name} from ${day(t.effective_from)}`).join(', ')}</p>

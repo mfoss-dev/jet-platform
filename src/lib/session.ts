@@ -20,11 +20,13 @@ export const getMe = cache(async (): Promise<Me> => {
   const id = claims?.claims?.sub;
   if (!id) redirect('/login');
 
-  const { data: p } = await supabase
+  const { data: p, error } = await supabase
     .from('profiles')
     .select('email, full_name, role, active, customer:customers(name, account_code)')
     .eq('id', id)
     .maybeSingle();
+  // A failed read must not quietly turn staff into customers. No row at all (uninvited) still means no access.
+  if (error) throw new Error(`Couldn't load your profile: ${error.message}`);
 
   const role = (p?.active ? p.role : 'customer_user') as Role;
   const customer = Array.isArray(p?.customer) ? p.customer[0] : p?.customer;

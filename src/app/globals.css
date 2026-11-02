@@ -197,3 +197,9 @@ input[type=checkbox],input[type=radio]{accent-color:var(--brand);width:15px;heig
   .form .s2{grid-column:auto}
   main{padding:16px} .login{grid-template-columns:1fr} .login .art{display:none}
 }
+@media print{
+  aside,.scrim,.noprint,.banner{display:none!important}
+  main,main.withshow{padding:0!important}
+  .card.invoice{border:none;padding:0}
+  .invoice tr{break-inside:avoid}
+}

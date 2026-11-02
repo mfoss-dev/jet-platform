@@ -214,3 +214,28 @@ on conflict (email) do nothing;
 insert into public.user_invites (email, full_name, role, customer_id) values
   ('priya@harbouroptics.example', 'Priya Shah', 'customer_admin', 'c0000000-0000-4000-8000-000000000001')
 on conflict (email) do nothing;
+
+-- ---------------------------------------------------------------- invoicing demo
+insert into public.invoice_sequences (branch_code, next_number) values ('AU', 356500), ('NZ', 21500) on conflict (branch_code) do nothing;
+update public.customers set invoice_recipients = billing_email where invoice_recipients is null and billing_email is not null;
+-- Coastal Cycles' invoices go to Coastal Pharma (a bill-to account, as JetStream's BillTo).
+update public.customers set bill_to_id = 'c0000000-0000-4000-8000-000000000005' where account_code = 'SYD1163' and bill_to_id is null;
+
+-- Last week's shipments, unbilled: freight with fuel 42.5% and security 2% (exports carry no GST).
+insert into public.charges (id, branch_code, customer_id, connote, shipped_on, service_code, code, description, charge, fuel, security, gst,
+  pieces, weight, orig_country, dest_country, source)
+select ('7f000000-0000-4000-8000-' || lpad(row_number() over (order by b.connote)::text, 12, '0'))::uuid, 'AU', b.customer_id,
+       'DEMOW' || b.connote, date '2026-10-26' + (row_number() over (order by b.connote))::integer % 6, b.service_code, '.FREIGHT', 'Freight',
+       b.freight, round(b.freight * 0.425, 2), round(b.freight * 0.02, 2), 0, 1, b.weight, 'AU', b.dest_country, 'demo'
+from public.billed_shipments b
+where b.source = 'demo' and b.shipped_on >= '2026-09-25'
+on conflict (id) do nothing;
+insert into public.charges (id, branch_code, customer_id, connote, shipped_on, service_code, code, description, charge, gst, source) values
+  ('7f000000-0000-4000-8000-100000000001', 'AU', 'c0000000-0000-4000-8000-000000000005', 'DEMOW-ADHOC', '2026-10-29', 'INTOUTEXP', 'zADHOC', 'Storage, 3 pallets', 120, 12, 'demo'),
+  ('7f000000-0000-4000-8000-100000000002', 'NZ', 'c0000000-0000-4000-8000-000000000009', 'DEMOW-NZ1', '2026-10-28', 'INTOUTEXP', '.FREIGHT', 'Freight', 86.40, 0, 'demo')
+on conflict (id) do nothing;
+insert into public.charges (id, branch_code, customer_id, connote, shipped_on, service_code, kind, code, description, charge, gst, source) values
+  ('7f000000-0000-4000-8000-200000000001', 'AU', 'c0000000-0000-4000-8000-000000000002', 'DEMOW-C1', '2026-10-30', 'CUSTOMS', 'duties', 'z#DTY', 'Customs: Total Duty', 64.20, 0, 'demo'),
+  ('7f000000-0000-4000-8000-200000000002', 'AU', 'c0000000-0000-4000-8000-000000000002', 'DEMOW-C1', '2026-10-30', 'CUSTOMS', 'duties', 'z#CST', 'Customs: Broker Fee', 22, 2.20, 'demo')
+on conflict (id) do nothing;
+

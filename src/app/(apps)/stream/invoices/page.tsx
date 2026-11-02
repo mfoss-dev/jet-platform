@@ -1,0 +1,75 @@
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { day, money, one } from '@/lib/format';
+import { SELECTS } from '@/lib/selects';
+import { getMe } from '@/lib/session';
+import { createClient } from '@/lib/supabase/server';
+import { STATUS } from './labels';
+
+type Inv = { id: string; branch_code: string; number: number | null; kind: string; invoice_date: string; due_date: string | null; total: number; status: string; flags: string[]; bill_to: { id: string; name: string; account_code: string } | null };
+
+const pick = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? '';
+const PAGE = 100;
+
+export default async function Invoices({ searchParams }: PageProps<'/stream/invoices'>) {
+  const me = await getMe();
+  if (!me.apps.includes('stream')) notFound();
+  const sp = await searchParams;
+  const q = pick(sp.q).trim();
+  const branch = pick(sp.branch);
+  const kind = pick(sp.kind);
+  const page = Math.max(0, Number(pick(sp.page)) || 0);
+  const supabase = await createClient();
+
+  let list = supabase.from(SELECTS.invoiceList.table).select(SELECTS.invoiceList.select, { count: 'exact' }).neq('status', 'draft');
+  if (branch) list = list.eq('branch_code', branch);
+  if (kind) list = list.eq('kind', kind);
+  if (/^\d+$/.test(q)) list = list.eq('number', Number(q));
+  else if (q) {
+    const { data: who } = await supabase.from(SELECTS.customerPicker.table).select('id')
+      .or(`name.ilike.%${q.replace(/[%_,()]/g, ' ')}%,account_code.ilike.%${q.replace(/[%_,()]/g, ' ')}%`).limit(200);
+    list = list.in('bill_to_id', (who ?? []).map((c) => c.id));
+  }
+  const { data, count } = await list.order('invoice_date', { ascending: false }).order('number', { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
+  const rows = ((data ?? []) as unknown as Inv[]).map((i) => ({ ...i, bill_to: one(i.bill_to) }));
+  const pages = Math.ceil((count ?? 0) / PAGE);
+  const link = (p: number) => ({ pathname: '/stream/invoices', query: { ...(q ? { q } : {}), ...(branch ? { branch } : {}), ...(kind ? { kind } : {}), page: p } });
+
+  return (
+    <>
+      <div className="top">
+        <div><h1>Invoices &amp; credits</h1><div className="sub">Every approved invoice, including JetStream&apos;s history since July 2026</div></div>
+      </div>
+      <form className="filters" action="/stream/invoices">
+        <input name="q" defaultValue={q} placeholder="Invoice number, account or name" aria-label="Search invoices" />
+        <select name="branch" className="f" defaultValue={branch} aria-label="Branch" style={{ width: 'auto' }}>
+          <option value="">Both branches</option><option value="AU">Sydney</option><option value="NZ">Auckland</option>
+        </select>
+        <select name="kind" className="f" defaultValue={kind} aria-label="Type" style={{ width: 'auto' }}>
+          <option value="">All types</option><option value="weekly">Weekly</option><option value="duties">Duties</option>
+        </select>
+        <button className="btn">Search</button>
+        <span className="hint">{(count ?? 0).toLocaleString()} invoices{pages > 1 ? ` · page ${page + 1} of ${pages}` : ''}</span>
+        {page > 0 && <Link className="btn sm" href={link(page - 1)}>← Newer</Link>}
+        {page + 1 < pages && <Link className="btn sm" href={link(page + 1)}>Older →</Link>}
+      </form>
+      <div className="card" style={{ padding: 0 }}>
+        <table>
+          <thead><tr><th>Number</th><th>Bill to</th><th>Branch</th><th>Type</th><th>Date</th><th>Due</th><th className="r">Total</th><th>Status</th></tr></thead>
+          <tbody>
+            {rows.map((i) => (
+              <tr key={i.id}>
+                <td><Link href={`/stream/invoices/${i.id}`}><b>{i.number ?? '—'}</b></Link></td>
+                <td>{i.bill_to?.name} <span className="hint">{i.bill_to?.account_code}</span></td>
+                <td>{i.branch_code}</td><td>{i.kind === 'duties' ? 'Duties' : 'Weekly'}</td>
+                <td>{day(i.invoice_date)}</td><td>{day(i.due_date)}</td><td className="r">{money(i.total)}</td>
+                <td><span className={`pill ${STATUS[i.status]?.[1] ?? ''}`}>{STATUS[i.status]?.[0] ?? i.status}</span></td>
+              </tr>
+            ))}
+            {!rows.length && <tr><td colSpan={8} className="hint">No invoices match.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}

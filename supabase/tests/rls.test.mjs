@@ -298,6 +298,48 @@ const run = async () => {
     assert.equal(Number((await one('select count(*) from public.sales_tariff_review')).count), 0);
   });
   results.push('  ✓ pricing review: tariff outliers, like-for-like preview of a move on real jobs, moves start on a date and are logged, one standard per service');
+
+  // ---- invoicing: weekly run by bill-to account, flags, numbering on approval, carry-over and holds
+  const PHARMA = 'c0000000-0000-4000-8000-000000000005', CYCLES = 'c0000000-0000-4000-8000-000000000007', REDFERN = 'c0000000-0000-4000-8000-000000000006';
+  const due = async (t, d) => (await one(`select private.due_date($1, $2::date)::text as d`, [t, d])).d;
+  assert.deepEqual([await due('14D', '2026-11-01'), await due('EOM', '2026-02-10'), await due('30EOM', '2026-01-15'), await due('XYZ', '2026-01-15')],
+    ['2026-11-15', '2026-02-28', '2026-03-02', null]);
+  await as(sam, 'sam@jetworldwide.example', async () => {
+    await db.exec('savepoint s1');
+    await assert.rejects(db.query(`select public.prepare_invoice_run('AU', 'weekly', '2026-11-01')`), /Only finance/);
+    await db.exec('rollback to savepoint s1');
+    await assert.rejects(db.query(`select private.build_invoice_run('AU', 'weekly', '2026-11-01', '2026-11-01', false)`), /permission denied/);
+  });
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    const run = (await one(`select public.prepare_invoice_run('AU', 'weekly', '2026-11-01') as id`)).id;
+    const invs = Object.fromEntries((await db.query(`select bill_to_id, flags, total::float, due_date::text, number from public.invoices where run_id = $1`, [run])).rows.map((r) => [r.bill_to_id, r]));
+    assert.equal(invs[CYCLES], undefined, "Coastal Cycles' charges go on Coastal Pharma's invoice");
+    assert.deepEqual(invs[PHARMA].flags, ['Has manual charges']);
+    assert.ok(invs[REDFERN].flags.includes('Account on hold'));
+    assert.equal(invs[HARBOUR].due_date, '2026-11-15', 'Harbour Optics: 14 days');
+    const unbilled = Number((await one(`select count(*) from public.charges where branch_code = 'AU' and kind = 'freight' and invoice_id is null and status = 'new' and shipped_on <= '2026-11-01'`)).count);
+    assert.equal(unbilled, 0, 'every freight charge to the period end is on an invoice');
+    assert.equal(Number((await one(`select count(*) from public.charges where kind = 'duties' and invoice_id is not null`)).count), 0, 'duties are not in the weekly run');
+    await db.exec('savepoint s2');
+    await assert.rejects(db.query(`select public.prepare_invoice_run('AU', 'weekly', '2026-11-01')`), /already a draft/);
+    await db.exec('rollback to savepoint s2');
+    const clean = Object.values(invs).filter((i) => !i.flags.length).length;
+    assert.equal((await one(`select public.approve_invoices($1) as n`, [run])).n, clean, 'one click approves every clean invoice');
+    const nums = (await db.query(`select number from public.invoices where run_id = $1 and status = 'approved' order by number`, [run])).rows.map((r) => Number(r.number));
+    assert.deepEqual(nums, nums.map((_, k) => 356500 + k), 'numbers run on from the branch sequence without gaps');
+    assert.equal((await one(`select status from public.invoice_runs where id = $1`, [run])).status, 'draft', 'flagged invoices still wait');
+    await db.query(`select public.release_invoices($1, array[(select id from public.invoices where run_id = $1 and bill_to_id = $2)], true)`, [run, REDFERN]);
+    assert.ok(Number((await one(`select count(*) from public.charges where customer_id = $1 and status = 'held'`, [REDFERN])).count) > 0, 'held charges wait for release');
+    await db.query(`select public.approve_invoices($1, array[(select id from public.invoices where run_id = $1 and bill_to_id = $2)])`, [run, PHARMA]);
+    assert.equal((await one(`select status from public.invoice_runs where id = $1`, [run])).status, 'approved');
+    const d = (await one(`select public.prepare_invoice_run('AU', 'duties', '2026-11-02') as id`)).id;
+    assert.deepEqual(Object.values(await one(`select terms_code, due_date::text, total::float from public.invoices where run_id = $1`, [d])), ['7D', '2026-11-09', 88.4], 'duties: own invoice, 7 days');
+  });
+  await as(priya, 'priya@harbouroptics.example', async () => {
+    assert.equal(Number((await one('select count(*) from public.invoices')).count), 0, 'customers see no draft invoices');
+    assert.equal(Number((await one('select count(*) from public.invoice_runs')).count), 0);
+  });
+  results.push('  ✓ invoicing: grouped by bill-to, duties apart on 7 days, flags hold back exceptions, one-click approval numbers without gaps, carry-over and holds');
 };
 
 try {

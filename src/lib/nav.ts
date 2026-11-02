@@ -29,7 +29,7 @@ export const APPS: Record<AppKey, { name: string; short: string; icon: IconName;
         { key: 'monitor', label: 'Shipment monitor', icon: 'monitor' }]],
       ['Carriers', [{ key: 'reweighs', label: 'Reweighs', icon: 'scale', live: true }, { key: 'cinv', label: 'Carrier invoices', icon: 'inbox' },
         { key: 'claims', label: 'Credit claims', icon: 'claim' }]],
-      ['Billing', [{ key: 'run', label: 'Invoice run', icon: 'play' }, { key: 'invoices', label: 'Invoices & credits', icon: 'doc' },
+      ['Billing', [{ key: 'run', label: 'Invoice run', icon: 'play', live: true }, { key: 'invoices', label: 'Invoices & credits', icon: 'doc', live: true },
         { key: 'exports', label: 'Accounting exports', icon: 'export' }]],
       ['Customers & pricing', [{ key: 'customers', label: 'Customers', icon: 'users', live: true }, { key: 'tariffs', label: 'Tariffs & fuel', icon: 'fuel', live: true }]],
       ['Admin', [{ key: 'users', label: 'Users & roles', icon: 'shield' }, { key: 'audit', label: 'Audit log', icon: 'clock', live: true }]],

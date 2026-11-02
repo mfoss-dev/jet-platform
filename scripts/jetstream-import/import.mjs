@@ -39,7 +39,7 @@ const groups = q(`select BranchCode, SalesZoneTypeCode, CountryCode, RangeFrom, 
 const lanes = q(`select BranchCode, CustomerCode, SalesZoneTypeCode, OrigGroup, DestGroup, SalesZoneCode from SalesZone`);
 const salesMasters = q(`select BranchCode, ServiceCode, BaseTariff, SalesTariff, Description from SalesTariffMaster`);
 const margins = q(`select BranchCode, ServiceCode, SalesTariff, ZoneCode, ConsignmentType, ToWeight, Margin from SalesTariff`);
-const customers = q(`select CustomerCode, BranchCode, CustomerName, Status, Active, PaymentTerms from Customer`);
+const customers = q(`select CustomerCode, BranchCode, CustomerName, Status, Active, PaymentTerms, BillTo from Customer`);
 const custTariffs = q(`select BranchCode, CustomerCode, ServiceCode, SalesTariff, EffectiveFrom, EffectiveTo, VolumetricDivisor from CustomersTariff where EffectiveTo >= '20260101'`);
 // Add-on rules (SalesAddOn) in force from 2025, plus weekly fuel reconstructed from billed freight lines: this backup
 // holds no #FUEL rules, so each week's rate per branch and service (and any customer's own rate) is the rate that was
@@ -52,6 +52,19 @@ const fuelLines = q(`select b.BranchCode, b.CustomerCode, b.ServiceCode, b.Shipm
   join (select ConnoteNo, BranchCode, CustomerCode, ServiceCode, ShipmentDate, HandRated from arcBilling union all
         select ConnoteNo, BranchCode, CustomerCode, ServiceCode, ShipmentDate, HandRated from Billing) b on b.ConnoteNo = t.ConnoteNo
   where t.TransactionType = '.FREIGHT' and t.Charge > 0 and b.HandRated = 'N' and b.ShipmentDate >= '20260101'`);
+// Charge lines (Transactions, live and archived) with their shipment details: invoice history and what is still unbilled.
+// A '#' status marks customs duties. Deleted lines are left behind.
+const invoiceLines = q(`select t.BranchCode, t.ChargeAccount, t.CustomerCode, t.ConnoteNo, t.Status, t.TransactionType, t.Description,
+  cast(t.Charge as decimal(12,2)) Charge, cast(t.Fuel as decimal(12,2)) Fuel, cast(t.Security as decimal(12,2)) Security, cast(t.GST as decimal(12,2)) GST,
+  t.InvoiceRun, t.InvoiceDate, t.InvoiceNo, t.DueDate, t.IncomeAccount, b.ShipmentDate, b.ServiceCode, b.Pieces, b.Weight, b.SenderCountryCode, b.ReceiverCountryCode,
+  b.Status as BillingStatus
+  from (select BranchCode, ChargeAccount, CustomerCode, ConnoteNo, Status, TransactionType, Description, Charge, Fuel, Security, GST, InvoiceRun, InvoiceDate, InvoiceNo, DueDate, IncomeAccount from Transactions
+        union all select BranchCode, ChargeAccount, CustomerCode, ConnoteNo, Status, TransactionType, Description, Charge, Fuel, Security, GST, InvoiceRun, InvoiceDate, InvoiceNo, DueDate, IncomeAccount from arcTransactions) t
+  left join (select ConnoteNo, ShipmentDate, ServiceCode, Pieces, Weight, SenderCountryCode, ReceiverCountryCode, Status from Billing
+        union all select ConnoteNo, ShipmentDate, ServiceCode, Pieces, Weight, SenderCountryCode, ReceiverCountryCode, Status from arcBilling) b on b.ConnoteNo = t.ConnoteNo
+  where t.Status not like 'DEL%'`);
+console.log(`  ${invoiceLines.length} charge lines (invoiced and unbilled)`);
+
 // Automatically rated jobs billed this year with their freight line: the pricing review re-prices them on other tariffs.
 const shipments = q(`select b.ConnoteNo, b.BranchCode, b.CustomerCode, b.ServiceCode, b.ShipmentDate, b.ConsignmentType, b.SenderCountryCode,
   b.SenderPostcode, b.ReceiverCountryCode, b.ReceiverPostcode, b.Weight, f.Freight
@@ -92,6 +105,9 @@ const custRows = customers.filter((c) => BRANCH[t(c.BranchCode)]).map((c) => {
   };
 });
 const custId = new Map(custRows.map((c) => [c.account_code, c.id]));
+// Bill-to accounts (JetStream's BillTo): who receives and pays the invoice when it isn't the account itself.
+const billToRows = customers.filter((c) => custId.has(t(c.CustomerCode)) && t(c.BillTo) && t(c.BillTo) !== t(c.CustomerCode) && custId.has(t(c.BillTo)))
+  .map((c) => ({ id: custId.get(t(c.CustomerCode)), bill_to: custId.get(t(c.BillTo)) }));
 
 // Rate cards: those with a 2026 life and rates. The master may be renamed with a "z" prefix (retired).
 const masterFor = (branch, code) => masters.find((m) => t(m.BranchCode) === branch && t(m.BaseTariff) === code)
@@ -249,6 +265,60 @@ const shipRows = [...new Map(shipments.filter((b) => BRANCH[t(b.BranchCode)] && 
   weight: Number(b.Weight), freight: Number(b.Freight),
 }])).values()].filter((r) => r.shipped);
 
+// Invoices and charge lines. JetStream statuses: NEW/LCK/PST = not yet invoiced, HLD = held, INV = invoiced (not sent),
+// SNT = sent, EXP = exported to MYOB; '#' = duties. Invoices are keyed by branch and number.
+const STATUS = (st) => st.replace('#', '');
+const invoiceKey = (l) => `${BRANCH[t(l.BranchCode)]}|${t(l.InvoiceNo)}`;
+const chargeRows = [];
+const invoiceMap = new Map();
+let linesSkipped = 0;
+for (const [n, l] of invoiceLines.entries()) {
+  const branch = BRANCH[t(l.BranchCode)];
+  const customer = custId.get(t(l.CustomerCode));
+  if (!branch || !customer) { linesSkipped++; continue; }
+  const st = STATUS(t(l.Status));
+  const duties = t(l.Status).endsWith('#') || t(l.ServiceCode) === 'CUSTOMS';
+  const invoiced = ['INV', 'SNT', 'EXP'].includes(st) && t(l.InvoiceNo);
+  let invoice = null;
+  if (invoiced) {
+    const key = invoiceKey(l);
+    const billTo = custId.get(t(l.ChargeAccount)) ?? customer;
+    const inv = invoiceMap.get(key) ?? {
+      id: uid('invoice', key), branch, number: Number(t(l.InvoiceNo)), kind: duties ? 'duties' : 'weekly', bill_to: billTo,
+      date: date(l.InvoiceDate), due: date(l.DueDate), run: t(l.InvoiceRun) || `${t(l.InvoiceDate)}`, status: st === 'EXP' ? 'exported' : st === 'SNT' ? 'sent' : 'approved',
+      charge: 0, fuel: 0, security: 0, gst: 0,
+    };
+    inv.charge += num(l.Charge); inv.fuel += num(l.Fuel); inv.security += num(l.Security); inv.gst += num(l.GST);
+    invoiceMap.set(key, inv);
+    invoice = inv.id;
+  }
+  chargeRows.push({
+    id: uid('charge', t(l.BranchCode), t(l.ConnoteNo), t(l.TransactionType), t(l.InvoiceNo), String(n)), branch, customer, connote: t(l.ConnoteNo),
+    shipped: date(l.ShipmentDate) ?? date(l.InvoiceDate) ?? '2026-01-01', service: t(l.ServiceCode) || null, kind: duties ? 'duties' : 'freight',
+    code: t(l.TransactionType), description: t(l.Description), charge: num(l.Charge), fuel: num(l.Fuel), security: num(l.Security), gst: num(l.GST),
+    account: t(l.IncomeAccount) || null, pieces: l.Pieces == null ? null : Number(l.Pieces), weight: l.Weight == null ? null : Number(l.Weight),
+    oc: t(l.SenderCountryCode) || null, dc: t(l.ReceiverCountryCode) || null,
+    status: invoice ? 'invoiced' : st === 'HLD' ? 'held' : t(l.BillingStatus).startsWith('NOINV') ? 'no_bill' : 'new', invoice,
+  });
+}
+// Charge ids must be unique even if JetStream repeats a line; keep the first.
+const chargeUnique = [...new Map(chargeRows.map((r) => [r.id, r])).values()];
+const invoiceRows = [...invoiceMap.values()].filter((i) => i.date);
+const r2c = (n) => Math.round(n * 100) / 100;
+const runMap = new Map();
+for (const i of invoiceRows) {
+  const key = `${i.branch}|${i.kind}|${i.run}`;
+  const pe = /^[A-Z]{2}:(\d{4}-\d{2}-\d{2})$/.exec(i.run)?.[1] ?? i.date;
+  const r = runMap.get(key) ?? { id: uid('run', key), branch: i.branch, kind: i.kind, period_end: pe, invoice_date: i.date };
+  if (i.date > r.invoice_date) r.invoice_date = i.date;
+  runMap.set(key, r);
+  i.run_id = r.id;
+}
+const runRows = [...runMap.values()];
+const invoiceIds = new Set(invoiceRows.map((i) => i.id));
+const nextNumber = Object.fromEntries(['AU', 'NZ'].map((b) => [b, Math.max(0, ...invoiceRows.filter((i) => i.branch === b).map((i) => i.number)) + 1]));
+if (linesSkipped) report.push(`${linesSkipped} charge lines skipped (branch or customer not imported)`);
+
 const lit = (v) => (v == null ? 'null' : typeof v === 'number' ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
 const files = [];
 const header = "set jet.importing = 'on';\n";
@@ -268,6 +338,11 @@ delete from public.zone_sets where code like 'DEMO-%' or id in (${allZoneIds.map
 insert into public.carriers (code, name) values ('JET', 'Jet Worldwide (own network)') on conflict (code) do nothing;
 delete from public.addon_rules where source in ('jetstream', 'reconstructed') or id::text like '7e000000-%';
 delete from public.billed_shipments where source in ('jetstream', 'demo');
+delete from public.charges where source in ('jetstream', 'demo');
+delete from public.invoices where source = 'jetstream' or id in (select id from public.invoices where run_id in (select id from public.invoice_runs where source = 'jetstream'));
+delete from public.invoice_runs where source = 'jetstream';
+delete from public.invoices i where i.status = 'draft' and not exists (select 1 from public.charges c where c.invoice_id = i.id);
+update public.customers set bill_to_id = null where bill_to_id is not null;
 insert into public.tariff_services (code, name) values
 ${serviceRows.map((r) => `(${lit(r.code)}, ${lit(r.name)})`).join(',\n')}
 on conflict (code) do nothing;
@@ -297,9 +372,18 @@ chunked('09-margins', marginRows, 3000, (rows) => `insert into public.sales_marg
 chunked('10-customer-tariffs', ctRows, 2000, (rows) => `insert into public.customer_tariffs (customer_id, service_code, effective_from, effective_to, sales_tariff_id, volumetric_divisor, created_by) values\n${rows.map((r) => `(${[r.customer, r.service, r.from, r.to, r.sid, r.divisor].map(lit).join(', ')}, null)`).join(',\n')};`);
 chunked('12-addons', addonUnique, 1500, (rows) => `insert into public.addon_rules (id, branch_code, customer_id, service_code, code, description, valid_from, valid_to, apply_when, percentage_of, percentage, fixed_fee, minimum, range_from, range_to, add_fuel, add_security, add_gst, income_account, source) values\n${rows.map((r) => `(${[r.id, r.branch_code, r.customer, r.service, r.code, r.description, r.valid_from, r.valid_to, r.apply_when, r.percentage_of, r.percentage, r.fixed_fee, r.minimum, r.range_from, r.range_to].map(lit).join(', ')}, ${r.add_fuel}, ${r.add_security}, ${r.add_gst}, ${lit(r.income_account)}, 'jetstream')`).join(',\n')};`);
 chunked('13-fuel', fuelRows, 1500, (rows) => `insert into public.addon_rules (id, branch_code, customer_id, service_code, code, description, valid_from, valid_to, apply_when, percentage, add_gst, source) values\n${rows.map((r) => `(${[r.id, r.branch_code, r.customer, r.service, '#FUEL', 'Fuel surcharge (reconstructed from billed jobs)', r.week, sunday(r.week), 'ADD=Y', r.pct].map(lit).join(', ')}, true, 'reconstructed')`).join(',\n')};`);
+write('15-bill-to', billToRows.length ? `update public.customers c set bill_to_id = v.bill_to::uuid from (values ${values(billToRows, ['id', 'bill_to'])}) as v (id, bill_to) where c.id = v.id::uuid;` : 'select 1;');
+write('16-invoice-runs', `insert into public.invoice_runs (id, branch_code, kind, period_end, invoice_date, status, created_by, source) values
+${runRows.map((r) => `(${[r.id, r.branch, r.kind, r.period_end, r.invoice_date].map(lit).join(', ')}, 'approved', null, 'jetstream')`).join(',\n')};`);
+chunked('17-invoices', invoiceRows, 1500, (rows) => `insert into public.invoices (id, run_id, branch_code, number, kind, bill_to_id, invoice_date, due_date, charge_total, fuel_total, security_total, gst_total, total, status, source) values
+${rows.map((i) => `(${[i.id, i.run_id, i.branch, i.number, i.kind, i.bill_to, i.date, i.due, r2c(i.charge), r2c(i.fuel), r2c(i.security), r2c(i.gst), r2c(i.charge + i.fuel + i.security + i.gst), i.status].map(lit).join(', ')}, 'jetstream')`).join(',\n')};`);
+chunked('18-charges', chargeUnique, 2000, (rows) => `insert into public.charges (id, branch_code, customer_id, connote, shipped_on, service_code, kind, code, description, charge, fuel, security, gst, income_account, pieces, weight, orig_country, dest_country, status, invoice_id, source) values
+${rows.map((c) => `(${[c.id, c.branch, c.customer, c.connote, c.shipped, c.service, c.kind, c.code, c.description, c.charge, c.fuel, c.security, c.gst, c.account, c.pieces, c.weight, c.oc, c.dc, c.status, invoiceIds.has(c.invoice) ? c.invoice : null].map(lit).join(', ')}, 'jetstream')`).join(',\n')};`);
+write('19-invoice-numbers', `insert into public.invoice_sequences (branch_code, next_number) values ('AU', ${nextNumber.AU}), ('NZ', ${nextNumber.NZ})
+on conflict (branch_code) do update set next_number = greatest(public.invoice_sequences.next_number, excluded.next_number);`);
 chunked('14-shipments', shipRows, 2000, (rows) => `insert into public.billed_shipments (connote, customer_id, branch_code, service_code, shipped_on, kind, orig_country, orig_postcode, dest_country, dest_postcode, weight, freight) values
 ${values(rows, ['connote', 'customer', 'branch', 'service', 'shipped', 'kind', 'oc', 'op', 'dc', 'dp', 'weight', 'freight'])};`);
-write('99-log', `select private.log_change('import', 'jetstream', jsonb_build_object('rate_cards', ${cards.length}, 'rates', ${rateRows.length}, 'sales_tariffs', ${sales.length}, 'margins', ${marginRows.length}, 'customers', ${custRows.length}, 'customer_tariffs', ${ctRows.length}, 'addon_rules', ${addonUnique.length}, 'fuel_weeks', ${fuelRows.length}, 'billed_shipments', ${shipRows.length}, 'source', 'JetStreamSeeded backup', 'run', ${lit(TODAY)}));`);
+write('99-log', `select private.log_change('import', 'jetstream', jsonb_build_object('rate_cards', ${cards.length}, 'rates', ${rateRows.length}, 'sales_tariffs', ${sales.length}, 'margins', ${marginRows.length}, 'customers', ${custRows.length}, 'customer_tariffs', ${ctRows.length}, 'addon_rules', ${addonUnique.length}, 'fuel_weeks', ${fuelRows.length}, 'billed_shipments', ${shipRows.length}, 'invoices', ${invoiceRows.length}, 'charges', ${chargeUnique.length}, 'source', 'JetStreamSeeded backup', 'run', ${lit(TODAY)}));`);
 
 mkdirSync(out, { recursive: true });
 for (const old of readdirSync(out).filter((n) => n.endsWith('.sql'))) rmSync(join(out, old));   // keep the folder (it may be open elsewhere)
@@ -307,7 +391,7 @@ for (const f of files) writeFileSync(join(out, `${f.name}.sql`), f.sql);
 console.log(`Wrote ${files.length} SQL files to ${out}`);
 console.log(`  ${cards.length} rate cards, ${rateRows.length} rates, ${zoneSets.length} zone guides (${groupRows.length} groups, ${laneRows.length} lanes),`);
 console.log(`  ${sales.length} sales tariffs, ${marginRows.length} margins, ${custRows.length} customers, ${ctRows.length} customer tariffs`);
-console.log(`  ${shipRows.length} billed shipments`);
+console.log(`  ${shipRows.length} billed shipments, ${invoiceRows.length} invoices in ${runRows.length} runs, ${chargeUnique.length} charge lines (${chargeUnique.filter((c) => !c.invoice).length} not yet invoiced), ${billToRows.length} bill-to accounts, next numbers AU ${nextNumber.AU} / NZ ${nextNumber.NZ}`);
 console.log(`  ${addonUnique.length} add-on rules, ${fuelRows.length} reconstructed weekly fuel rates (${fuelRows.filter((f) => f.customer).length} customer-specific), ${serviceRows.length} services`);
 for (const r of report) console.log(`  note: ${r}`);
 if (dryRun) process.exit(0);

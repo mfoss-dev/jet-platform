@@ -40,5 +40,11 @@ export const SELECTS = {
   salesUsage: { table: 'sales_tariff_usage', select: 'sales_tariff_id, customers' },
   salesCustomers: { table: 'customer_tariffs', select: 'effective_from, effective_to, customer:customers(id, name, account_code)' },
   salesReview: { table: 'sales_tariff_review', select: 'id, code, name, branch_code, service_code, is_standard, base_tariff_id, rate_card, customers, cells, min_margin, avg_margin, max_margin, distinct_margins, jobs_12m, freight_12m' },
+  runSummary: { table: 'invoice_run_summary', select: 'id, branch_code, kind, period_end, invoice_date, status, automatic, source, created_at, approved_at, invoices, drafts, flagged, total, first_number, last_number' },
+  unbilled: { table: 'unbilled_summary', select: 'branch_code, kind, status, lines, shipments, total, oldest' },
+  invoiceList: { table: 'invoices', select: 'id, run_id, branch_code, number, kind, invoice_date, due_date, terms_code, total, gst_total, status, flags, bill_to:customers!invoices_bill_to_id_fkey(id, name, account_code)' },
+  invoice: { table: 'invoices', select: 'id, run_id, branch_code, number, kind, invoice_date, due_date, terms_code, charge_total, fuel_total, security_total, gst_total, total, status, flags, sent_at, exported_at, source, bill_to:customers!invoices_bill_to_id_fkey(id, name, account_code, invoice_recipients)' },
+  invoiceLines: { table: 'charges', select: 'id, connote, shipped_on, service_code, kind, code, description, charge, fuel, security, gst, income_account, pieces, weight, orig_country, dest_country, invoice_id, customer:customers!charges_customer_id_fkey(name, account_code)' },
+  heldCharges: { table: 'charges', select: 'id, branch_code, connote, shipped_on, code, description, charge, fuel, security, gst, status, customer:customers!charges_customer_id_fkey(name, account_code)' },
   customerPicker: { table: 'customers', select: 'id, account_code, name' },
 } as const;

@@ -17,7 +17,7 @@ export const APPS: Record<AppKey, { name: string; short: string; icon: IconName;
     groups: [
       ['Shipping', [{ key: 'dash', label: 'Dashboard', icon: 'home' }, { key: 'ship', label: 'New shipment', icon: 'plus' },
         { key: 'list', label: 'My shipments', icon: 'box' }, { key: 'track', label: 'Track', icon: 'pin' }, { key: 'pickup', label: 'Book pickup', icon: 'truck' }]],
-      ['Account', [{ key: 'addr', label: 'Address book', icon: 'book' }, { key: 'inv', label: 'Invoices', icon: 'dollar' },
+      ['Account', [{ key: 'addr', label: 'Address book', icon: 'book' }, { key: 'inv', label: 'Invoices', icon: 'dollar', live: true },
         { key: 'ask', label: 'Ask about my account', icon: 'chat' }, { key: 'ai', label: 'AI assistant', icon: 'plug' },
         { key: 'account', label: 'Account & users', icon: 'gear' }]],
     ],

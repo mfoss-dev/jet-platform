@@ -405,6 +405,24 @@ const run = async () => {
     assert.equal(Number((await one(`select count(*) from public.invoices where kind = 'credit'`)).count), 2, 'the customer sees its approved credit notes');
   });
   results.push('  ✓ credit notes: part of a line or the rest of an invoice, never more than billed, numbered on approval, re-billed to another account; over the limit only another manager approves');
+
+  // ---- portal invoices: the paying account sees every line of its invoices, including its branches' shipments
+  await db.query(`update public.profiles set customer_id = $1 where id = $2`, [PHARMA, stranger]);
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    const run = (await one(`select public.prepare_invoice_run('AU', 'weekly', '2026-11-01') as id`)).id;
+    await db.query(`select public.approve_invoices($1, array(select id from public.invoices where run_id = $1))`, [run]);
+    const inv = (await one(`select id from public.invoices where run_id = $1 and bill_to_id = $2`, [run, PHARMA])).id;
+    const lines = Number((await one(`select count(*) from public.charges where invoice_id = $1`, [inv])).count);
+    const branchLines = Number((await one(`select count(*) from public.charges where invoice_id = $1 and customer_id = $2`, [inv, CYCLES])).count);
+    assert.ok(branchLines > 0, 'the demo has a branch account billed to its parent');
+    const line = (await one(`select id from public.charges where invoice_id = $1 limit 1`, [inv])).id;
+    await db.query(`select public.create_credit_note($1, $2, 'Wrong price')`, [inv, JSON.stringify([{ id: line, amount: 1 }])]);
+    await db.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: stranger, email: 'someone@else.example' })]);
+    assert.equal(Number((await one(`select count(*) from public.charges where invoice_id = $1`, [inv])).count), lines, "the payer sees its branch account's lines too");
+    assert.equal(Number((await one(`select count(*) from public.charges where source = 'credit'`)).count), 0, 'draft credit lines stay hidden');
+    assert.equal(Number((await one(`select count(*) from public.invoices where bill_to_id <> $1`, [PHARMA])).count), 0, "never another customer's invoices");
+  });
+  results.push("  ✓ portal invoices: the paying account sees every line on its invoices, never draft credits or another customer's invoices");
 };
 
 try {

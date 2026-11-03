@@ -84,6 +84,8 @@ export default async function InvoiceView({ params, searchParams }: PageProps<'/
           {inv.run_id && <Link className="btn" href={`/stream/run?run=${inv.run_id}`}>Back to the run</Link>}
           {canEdit && !isCredit && inv.status !== 'draft' && <Link className="btn" href={`/stream/invoices/${id}/credit`}>Raise credit note</Link>}
           {isCredit && inv.status !== 'draft' && <a className="btn" href={`/stream/invoices/myob?id=${id}`}>MYOB file</a>}
+          {inv.status !== 'draft' && <a className="btn" href={`/invoices/${id}/pdf`} target="_blank" rel="noreferrer">PDF</a>}
+          {inv.status !== 'draft' && <a className="btn ghost" href={`/invoices/${id}/csv`}>Shipment CSV</a>}
           <PrintButton />
         </div>
       </div>

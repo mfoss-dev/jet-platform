@@ -39,7 +39,7 @@ const groups = q(`select BranchCode, SalesZoneTypeCode, CountryCode, RangeFrom, 
 const lanes = q(`select BranchCode, CustomerCode, SalesZoneTypeCode, OrigGroup, DestGroup, SalesZoneCode from SalesZone`);
 const salesMasters = q(`select BranchCode, ServiceCode, BaseTariff, SalesTariff, Description from SalesTariffMaster`);
 const margins = q(`select BranchCode, ServiceCode, SalesTariff, ZoneCode, ConsignmentType, ToWeight, Margin from SalesTariff`);
-const customers = q(`select CustomerCode, BranchCode, CustomerName, Status, Active, PaymentTerms, BillTo, SalesRepCode, FirstTradeDate from Customer`);
+const customers = q(`select CustomerCode, BranchCode, CustomerName, Status, Active, PaymentTerms, BillTo, SalesRepCode, FirstTradeDate, StartDate from Customer`);
 // Rep codes and names only (JetStream also holds reps' phones and emails; those stay behind).
 const reps = q(`select SalesRepCode, SalesRepName from SalesRep`);
 const custTariffs = q(`select BranchCode, CustomerCode, ServiceCode, SalesTariff, EffectiveFrom, EffectiveTo, VolumetricDivisor from CustomersTariff where EffectiveTo >= '20260101'`);
@@ -122,7 +122,7 @@ const repRows = [...new Set([...reps.map((r) => repCode(r.SalesRepCode)), ...rep
 });
 const repSet = new Set(repRows.map((r) => r.code));
 const repAssign = customers.filter((c) => custId.has(t(c.CustomerCode)))
-  .map((c) => ({ id: custId.get(t(c.CustomerCode)), rep: repSet.has(repCode(c.SalesRepCode)) ? repCode(c.SalesRepCode) : null, first: date(c.FirstTradeDate) }))
+  .map((c) => ({ id: custId.get(t(c.CustomerCode)), rep: repSet.has(repCode(c.SalesRepCode)) ? repCode(c.SalesRepCode) : null, first: date(c.FirstTradeDate) ?? date(c.StartDate) }))
   .filter((r) => r.rep || r.first);
 if (repRows.some((r) => !reps.find((x) => repCode(x.SalesRepCode) === r.code))) report.push(`rep codes used by customers but not in SalesRep: ${repRows.filter((r) => !reps.find((x) => repCode(x.SalesRepCode) === r.code)).map((r) => r.code).join(', ')}`);
 

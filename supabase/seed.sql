@@ -239,3 +239,16 @@ insert into public.charges (id, branch_code, customer_id, connote, shipped_on, s
   ('7f000000-0000-4000-8000-200000000002', 'AU', 'c0000000-0000-4000-8000-000000000002', 'DEMOW-C1', '2026-10-30', 'CUSTOMS', 'duties', 'z#CST', 'Customs: Broker Fee', 22, 2.20, 'demo')
 on conflict (id) do nothing;
 
+
+-- JetSales demo: rep codes and who looks after each demo account (the real ones come from JetStream's SalesRep).
+insert into public.sales_reps (code, name, branch_code, is_house, source) values
+  ('HOUSE', 'House accounts', null, true, 'demo'),
+  ('SAM', 'Sam (demo rep)', 'AU', false, 'demo'),
+  ('DEMO2', 'Second demo rep', 'AU', false, 'demo'),
+  ('NZREP', 'Auckland demo rep', 'NZ', false, 'demo')
+on conflict (code) do nothing;
+update public.customers set sales_rep_code = case account_code
+    when 'SYD1021' then 'SAM' when 'SYD1088' then 'SAM' when 'SYD1007' then 'DEMO2' when 'SYD1112' then 'DEMO2'
+    when 'AKL2033' then 'NZREP' when 'AKL2041' then 'NZREP' else 'HOUSE' end
+ where sales_rep_code is null and id::text like 'c0000000-%';
+update public.customers set first_trade_date = date '2026-09-01' where account_code = 'SYD1170' and first_trade_date is null;

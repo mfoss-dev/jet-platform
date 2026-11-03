@@ -124,7 +124,7 @@ export default async function Today() {
           {['AU', 'NZ'].map((b) => (
             <div key={b} className="mt8">
               <b>{BRANCH[b]}</b>
-              <div className="steps">
+              <div className="cycle">
                 {cycle(b).map((s) => (
                   <div className="row" key={s.label}>
                     <span className={`ic ${s.state}`}>{s.state === 'd' ? '✓' : s.state === 'w' ? '!' : '○'}</span>

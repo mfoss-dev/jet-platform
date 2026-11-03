@@ -204,8 +204,8 @@ input[type=checkbox],input[type=radio]{accent-color:var(--brand);width:15px;heig
   .invoice tr{break-inside:avoid}
 }
 
-/* Today: the week's steps */
-.steps .row{display:flex;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line)}
-.steps .row:last-child{border-bottom:0}
-.steps .row b{display:block}.steps .row span{color:var(--muted);font-size:12.5px}
-.steps .ic{width:18px;font-weight:700;color:var(--muted);flex:none} .steps .ic.d{color:var(--ok)} .steps .ic.w{color:var(--warn)}
+/* Today: the week's invoicing cycle */
+.cycle .row{display:flex;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line)}
+.cycle .row:last-child{border-bottom:0}
+.cycle .row b{display:block}.cycle .row span{color:var(--muted);font-size:12.5px}
+.cycle .ic{width:18px;font-weight:700;color:var(--muted);flex:none} .cycle .ic.d{color:var(--ok)} .cycle .ic.w{color:var(--warn)}

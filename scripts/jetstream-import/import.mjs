@@ -39,7 +39,9 @@ const groups = q(`select BranchCode, SalesZoneTypeCode, CountryCode, RangeFrom, 
 const lanes = q(`select BranchCode, CustomerCode, SalesZoneTypeCode, OrigGroup, DestGroup, SalesZoneCode from SalesZone`);
 const salesMasters = q(`select BranchCode, ServiceCode, BaseTariff, SalesTariff, Description from SalesTariffMaster`);
 const margins = q(`select BranchCode, ServiceCode, SalesTariff, ZoneCode, ConsignmentType, ToWeight, Margin from SalesTariff`);
-const customers = q(`select CustomerCode, BranchCode, CustomerName, Status, Active, PaymentTerms, BillTo from Customer`);
+const customers = q(`select CustomerCode, BranchCode, CustomerName, Status, Active, PaymentTerms, BillTo, SalesRepCode, FirstTradeDate from Customer`);
+// Rep codes and names only (JetStream also holds reps' phones and emails; those stay behind).
+const reps = q(`select SalesRepCode, SalesRepName from SalesRep`);
 const custTariffs = q(`select BranchCode, CustomerCode, ServiceCode, SalesTariff, EffectiveFrom, EffectiveTo, VolumetricDivisor from CustomersTariff where EffectiveTo >= '20260101'`);
 // Add-on rules (SalesAddOn) in force from 2025, plus weekly fuel reconstructed from billed freight lines: this backup
 // holds no #FUEL rules, so each week's rate per branch and service (and any customer's own rate) is the rate that was
@@ -105,6 +107,25 @@ const custRows = customers.filter((c) => BRANCH[t(c.BranchCode)]).map((c) => {
   };
 });
 const custId = new Map(custRows.map((c) => [c.account_code, c.id]));
+// Sales reps (JetStream's SalesRep) and each account's rep. Codes used by customers but missing from SalesRep (a rep
+// who has left) come across too, named by their code. HOUSE is the office's own accounts.
+const repCode = (v) => t(v).toUpperCase();
+const repBranches = new Map();
+for (const c of customers.filter((c) => custId.has(t(c.CustomerCode)) && repCode(c.SalesRepCode))) {
+  const k = repCode(c.SalesRepCode);
+  repBranches.set(k, new Set([...(repBranches.get(k) ?? []), BRANCH[t(c.BranchCode)]]));
+}
+const repRows = [...new Set([...reps.map((r) => repCode(r.SalesRepCode)), ...repBranches.keys()])].filter((k) => /^[A-Z0-9_-]+$/.test(k)).map((k) => {
+  const r = reps.find((x) => repCode(x.SalesRepCode) === k);
+  const b = [...(repBranches.get(k) ?? [])];
+  return { code: k, name: t(r?.SalesRepName) || `${k} (not in JetStream's rep list)`, branch: b.length === 1 ? b[0] : null, house: k === 'HOUSE' };
+});
+const repSet = new Set(repRows.map((r) => r.code));
+const repAssign = customers.filter((c) => custId.has(t(c.CustomerCode)))
+  .map((c) => ({ id: custId.get(t(c.CustomerCode)), rep: repSet.has(repCode(c.SalesRepCode)) ? repCode(c.SalesRepCode) : null, first: date(c.FirstTradeDate) }))
+  .filter((r) => r.rep || r.first);
+if (repRows.some((r) => !reps.find((x) => repCode(x.SalesRepCode) === r.code))) report.push(`rep codes used by customers but not in SalesRep: ${repRows.filter((r) => !reps.find((x) => repCode(x.SalesRepCode) === r.code)).map((r) => r.code).join(', ')}`);
+
 // Bill-to accounts (JetStream's BillTo): who receives and pays the invoice when it isn't the account itself.
 const billToRows = customers.filter((c) => custId.has(t(c.CustomerCode)) && t(c.BillTo) && t(c.BillTo) !== t(c.CustomerCode) && custId.has(t(c.BillTo)))
   .map((c) => ({ id: custId.get(t(c.CustomerCode)), bill_to: custId.get(t(c.BillTo)) }));
@@ -373,6 +394,12 @@ chunked('10-customer-tariffs', ctRows, 2000, (rows) => `insert into public.custo
 chunked('12-addons', addonUnique, 1500, (rows) => `insert into public.addon_rules (id, branch_code, customer_id, service_code, code, description, valid_from, valid_to, apply_when, percentage_of, percentage, fixed_fee, minimum, range_from, range_to, add_fuel, add_security, add_gst, income_account, source) values\n${rows.map((r) => `(${[r.id, r.branch_code, r.customer, r.service, r.code, r.description, r.valid_from, r.valid_to, r.apply_when, r.percentage_of, r.percentage, r.fixed_fee, r.minimum, r.range_from, r.range_to].map(lit).join(', ')}, ${r.add_fuel}, ${r.add_security}, ${r.add_gst}, ${lit(r.income_account)}, 'jetstream')`).join(',\n')};`);
 chunked('13-fuel', fuelRows, 1500, (rows) => `insert into public.addon_rules (id, branch_code, customer_id, service_code, code, description, valid_from, valid_to, apply_when, percentage, add_gst, source) values\n${rows.map((r) => `(${[r.id, r.branch_code, r.customer, r.service, '#FUEL', 'Fuel surcharge (reconstructed from billed jobs)', r.week, sunday(r.week), 'ADD=Y', r.pct].map(lit).join(', ')}, true, 'reconstructed')`).join(',\n')};`);
 write('15-bill-to', billToRows.length ? `update public.customers c set bill_to_id = v.bill_to::uuid from (values ${values(billToRows, ['id', 'bill_to'])}) as v (id, bill_to) where c.id = v.id::uuid;` : 'select 1;');
+write('20-sales-reps', `
+insert into public.sales_reps (code, name, branch_code, is_house, source) values
+${repRows.map((r) => `(${[r.code, r.name, r.branch].map(lit).join(', ')}, ${r.house}, 'jetstream')`).join(',\n')}
+on conflict (code) do update set name = excluded.name, branch_code = excluded.branch_code, source = 'jetstream';
+${repAssign.length ? `update public.customers c set sales_rep_code = v.rep, first_trade_date = v.first::date from (values ${values(repAssign, ['id', 'rep', 'first'])}) as v (id, rep, first) where c.id = v.id::uuid;` : ''}
+`);
 write('16-invoice-runs', `insert into public.invoice_runs (id, branch_code, kind, period_end, invoice_date, status, created_by, source) values
 ${runRows.map((r) => `(${[r.id, r.branch, r.kind, r.period_end, r.invoice_date].map(lit).join(', ')}, 'approved', null, 'jetstream')`).join(',\n')};`);
 chunked('17-invoices', invoiceRows, 1500, (rows) => `insert into public.invoices (id, run_id, branch_code, number, kind, bill_to_id, invoice_date, due_date, charge_total, fuel_total, security_total, gst_total, total, status, source) values

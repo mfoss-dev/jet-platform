@@ -38,8 +38,8 @@ export const APPS: Record<AppKey, { name: string; short: string; icon: IconName;
   sales: {
     name: 'JetSales', short: 'Sales', icon: 'chart',
     groups: [
-      ['Performance', [{ key: 'overview', label: 'Overview', icon: 'chart' }, { key: 'reps', label: 'Rep performance', icon: 'users' },
-        { key: 'rep', label: 'Rep detail', icon: 'user' }, { key: 'health', label: 'Account health', icon: 'pulse' }]],
+      ['Performance', [{ key: 'overview', label: 'Overview', icon: 'chart', live: true }, { key: 'reps', label: 'Rep performance', icon: 'users', live: true },
+        { key: 'rep', label: 'Rep detail', icon: 'user', live: true }, { key: 'health', label: 'Account health', icon: 'pulse', live: true }]],
       ['Commission', [{ key: 'comm', label: 'Commission', icon: 'dollar' }, { key: 'plans', label: 'Plans & accounts', icon: 'doc' },
         { key: 'email', label: 'Rep weekly email', icon: 'mail' }]],
       ['Ask', [{ key: 'ask', label: 'Ask the business', icon: 'chat' }]],

@@ -482,6 +482,29 @@ const run = async () => {
     await assert.rejects(db.query(`select public.invite_user('q@jetworldwide.example', 'Q', 'finance', 'AU')`), /can't manage users/);
   });
   results.push('  ✓ user management: management invites and changes staff and portal users (not admins, not themselves); customer admins manage only their own company; all audited');
+
+  // ---- JetSales: reps see their own accounts' sales, management all; customers none
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    await db.query(`select public.set_sales_rep('SAM', $1, false)`, [sam]);
+    const all = (await db.query(`select account_code, rep_code, health, sales_13w::float as s13 from public.sales_accounts()`)).rows;
+    assert.ok(all.length >= 10 && all.some((a) => a.s13 > 0), 'management sees every account with its sales');
+    assert.ok(all.every((a) => ['new', 'lost', 'quiet', 'at_risk', 'growing', 'steady', 'none'].includes(a.health)));
+    assert.equal(all.find((a) => a.account_code === 'SYD1170').health, 'new', 'a recent first trade date makes an account new');
+    const weeks = (await db.query(`select week_start, rep_code, sales::float from public.sales_weekly(13)`)).rows;
+    assert.ok(weeks.length > 0 && weeks.every((w) => new Date(w.week_start).getUTCDay() === 1), 'weekly sales, weeks starting Monday');
+    const withDuties = Number((await one(`select sum(sales_total) from public.sales_accounts(true)`)).sum);
+    assert.ok(withDuties > Number((await one(`select sum(sales_total) from public.sales_accounts()`)).sum), 'duties only count when asked for');
+
+    await db.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: sam, email: 'sam@jetworldwide.example' })]);
+    const mine = (await db.query(`select account_code, rep_code from public.sales_accounts()`)).rows;
+    assert.deepEqual(mine.map((a) => a.account_code).sort(), ['SYD1021', 'SYD1088'], "a rep sees only their own accounts");
+    assert.ok((await db.query(`select distinct rep_code from public.sales_weekly(13)`)).rows.every((w) => w.rep_code === 'SAM'));
+    await tryAs(`select public.assign_sales_rep(array[$1]::uuid[], 'SAM')`, [PHARMA], /Only management/, 'reps cannot take accounts');
+
+    await db.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: priya, email: 'priya@harbouroptics.example' })]);
+    assert.equal(Number((await one(`select count(*) from public.sales_accounts()`)).count), 0, 'customers see no sales figures');
+  });
+  results.push("  ✓ JetSales: management sees every account's sales and health, a rep only their own, customers nothing; duties left out unless asked");
 };
 
 try {

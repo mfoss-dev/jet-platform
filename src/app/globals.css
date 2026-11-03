@@ -203,3 +203,9 @@ input[type=checkbox],input[type=radio]{accent-color:var(--brand);width:15px;heig
   .card.invoice{border:none;padding:0}
   .invoice tr{break-inside:avoid}
 }
+
+/* Today: the week's steps */
+.steps .row{display:flex;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line)}
+.steps .row:last-child{border-bottom:0}
+.steps .row b{display:block}.steps .row span{color:var(--muted);font-size:12.5px}
+.steps .ic{width:18px;font-weight:700;color:var(--muted);flex:none} .steps .ic.d{color:var(--ok)} .steps .ic.w{color:var(--warn)}

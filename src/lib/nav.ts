@@ -25,7 +25,7 @@ export const APPS: Record<AppKey, { name: string; short: string; icon: IconName;
   stream: {
     name: 'JetStream', short: 'Stream', icon: 'list',
     groups: [
-      ['Daily work', [{ key: 'today', label: 'Today', icon: 'home' }, { key: 'feed', label: 'Billing feed', icon: 'list', live: true },
+      ['Daily work', [{ key: 'today', label: 'Today', icon: 'home', live: true }, { key: 'feed', label: 'Billing feed', icon: 'list', live: true },
         { key: 'monitor', label: 'Shipment monitor', icon: 'monitor' }]],
       ['Carriers', [{ key: 'reweighs', label: 'Reweighs', icon: 'scale', live: true }, { key: 'cinv', label: 'Carrier invoices', icon: 'inbox' },
         { key: 'claims', label: 'Credit claims', icon: 'claim' }]],
@@ -82,8 +82,9 @@ const liveItem = (app: AppKey) => APPS[app].groups.flatMap(([, i]) => i).find((i
 // Where an app opens: its first connected screen, otherwise its first menu item.
 export const appStart = (app: AppKey) => `/${app}/${(liveItem(app) ?? APPS[app].groups[0][1][0]).key}`;
 
-// After sign-in: the first of the person's apps that has a connected screen (staff land on the billing feed).
+// After sign-in: staff land in JetStream (Today), customers in the portal; otherwise the first app with a connected screen.
 export function homeFor(role: Role) {
   const apps = ROLE_APPS[role];
-  return appStart(apps.find((a) => liveItem(a)) ?? apps[0]);
+  const first = apps.includes('stream') ? 'stream' : apps.find((a) => liveItem(a)) ?? apps[0];
+  return appStart(first);
 }

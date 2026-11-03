@@ -423,6 +423,29 @@ const run = async () => {
     assert.equal(Number((await one(`select count(*) from public.invoices where bill_to_id <> $1`, [PHARMA])).count), 0, "never another customer's invoices");
   });
   results.push("  ✓ portal invoices: the paying account sees every line on its invoices, never draft credits or another customer's invoices");
+
+  // ---- my shipments: own shipments only, amounts once invoiced, do-not-bill hidden
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    await db.query(`insert into public.charges (branch_code, customer_id, connote, shipped_on, code, charge, status) values ('AU', $1, 'NOBILL1', '2026-10-30', '.FREIGHT', 50, 'no_bill')`, [HARBOUR]);
+    const staffRows = Number((await one(`select count(*) from public.portal_shipments()`)).count);
+    const priyaView = async () => {
+      await db.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: priya, email: 'priya@harbouroptics.example' })]);
+      const rows = (await db.query(`select connote, status, total::float, invoice_number from public.portal_shipments()`)).rows;
+      await db.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: chris, email: 'chris@jetworldwide.example' })]);
+      return rows;
+    };
+    const before = await priyaView();
+    assert.ok(before.length > 0 && before.length < staffRows, 'a customer sees some shipments, staff see them all');
+    assert.equal(Number((await one(`select count(distinct customer_id) from public.portal_shipments() where connote = any($1)`, [before.map((r) => r.connote)])).count), 1, 'only her own account');
+    assert.ok(!before.some((r) => r.connote === 'NOBILL1'), 'do-not-bill shipments are hidden from customers');
+    assert.ok(before.filter((r) => r.status === 'to_invoice').every((r) => r.total === null), 'no amount until invoiced');
+    const run = (await one(`select public.prepare_invoice_run('AU', 'weekly', '2026-11-01') as id`)).id;
+    await db.query(`select public.approve_invoices($1, array(select id from public.invoices where run_id = $1 and bill_to_id = $2))`, [run, HARBOUR]);
+    const after = await priyaView();
+    const billed = after.filter((r) => r.status === 'invoiced' && r.invoice_number);
+    assert.ok(billed.length > 0 && billed.every((r) => r.total > 0), 'invoiced shipments show the amount and invoice number');
+  });
+  results.push('  ✓ my shipments: a customer sees only its own shipments, amounts once invoiced, do-not-bill hidden; staff see all');
 };
 
 try {

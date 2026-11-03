@@ -10,7 +10,7 @@ const AREAS: Record<string, string> = {
   jobs: 'Billing feed', reweighs: 'Reweighs', customers: 'Customers', addon_rules: 'Fuel & add-ons',
   tariff_versions: 'Rate card versions', tariff_rates: 'Rate card prices', zone_sets: 'Zone guides', import: 'Imports', base_tariffs: 'Rate cards', sales_tariffs: 'Sales tariffs',
   sales_margins: 'Sales tariff margins', customer_tariffs: 'Customer tariffs',
-  profiles: 'Users & roles', services: 'Services', zones: 'Zones', carriers: 'Carriers',
+  profiles: 'Users & roles', user_invites: 'Invites', invoices: 'Invoices & credits', invoice_runs: 'Invoice runs', branches: 'Branches', services: 'Services', zones: 'Zones', carriers: 'Carriers',
 };
 const IGNORE = new Set(['updated_at', 'created_at', 'held_at', 'decided_at', 'id']);
 const PERIODS = [['1', 'Last 24 hours'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['365', 'Last year']] as const;

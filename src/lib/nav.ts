@@ -19,7 +19,7 @@ export const APPS: Record<AppKey, { name: string; short: string; icon: IconName;
         { key: 'list', label: 'My shipments', icon: 'box', live: true }, { key: 'track', label: 'Track', icon: 'pin' }, { key: 'pickup', label: 'Book pickup', icon: 'truck' }]],
       ['Account', [{ key: 'addr', label: 'Address book', icon: 'book' }, { key: 'inv', label: 'Invoices', icon: 'dollar', live: true },
         { key: 'ask', label: 'Ask about my account', icon: 'chat' }, { key: 'ai', label: 'AI assistant', icon: 'plug' },
-        { key: 'account', label: 'Account & users', icon: 'gear' }]],
+        { key: 'account', label: 'Account & users', icon: 'gear', live: true }]],
     ],
   },
   stream: {
@@ -32,7 +32,7 @@ export const APPS: Record<AppKey, { name: string; short: string; icon: IconName;
       ['Billing', [{ key: 'run', label: 'Invoice run', icon: 'play', live: true }, { key: 'invoices', label: 'Invoices & credits', icon: 'doc', live: true },
         { key: 'exports', label: 'Accounting exports', icon: 'export' }]],
       ['Customers & pricing', [{ key: 'customers', label: 'Customers', icon: 'users', live: true }, { key: 'tariffs', label: 'Tariffs & fuel', icon: 'fuel', live: true }]],
-      ['Admin', [{ key: 'users', label: 'Users & roles', icon: 'shield' }, { key: 'audit', label: 'Audit log', icon: 'clock', live: true }]],
+      ['Admin', [{ key: 'users', label: 'Users & roles', icon: 'shield', live: true }, { key: 'audit', label: 'Audit log', icon: 'clock', live: true }]],
     ],
   },
   sales: {

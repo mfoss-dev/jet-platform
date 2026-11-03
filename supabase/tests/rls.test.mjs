@@ -17,7 +17,7 @@ await db.exec(`
   grant usage on schema public to anon, authenticated, service_role;
   -- No default table grants: like the hosted project, every table needs an explicit GRANT in a migration.
   create schema auth; grant usage on schema auth to anon, authenticated, service_role;
-  create table auth.users (id uuid primary key default gen_random_uuid(), email text, raw_user_meta_data jsonb default '{}');
+  create table auth.users (id uuid primary key default gen_random_uuid(), email text, raw_user_meta_data jsonb default '{}', last_sign_in_at timestamptz);
   create function auth.jwt() returns jsonb language sql stable as $$
     select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
   create function auth.uid() returns uuid language sql stable as $$ select nullif(auth.jwt() ->> 'sub', '')::uuid $$;
@@ -446,6 +446,42 @@ const run = async () => {
     assert.ok(billed.length > 0 && billed.every((r) => r.total > 0), 'invoiced shipments show the amount and invoice number');
   });
   results.push('  ✓ my shipments: a customer sees only its own shipments, amounts once invoiced, do-not-bill hidden; staff see all');
+
+  // ---- user management: who may invite and change whom
+  const early2 = (await one(`select id from public.profiles where email = 'early@jetworldwide.example'`)).id;
+  const tryAs = async (sql, params, re, msg) => {
+    await db.exec('savepoint u');
+    await assert.rejects(db.query(sql, params), re, msg);
+    await db.exec('rollback to savepoint u');
+  };
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    await db.query(`select public.invite_user('New.Person@JetWorldwide.example', 'New Person', 'finance', 'AU')`);
+    const dir = (await db.query(`select email, pending, can_change from public.user_directory()`)).rows;
+    assert.ok(dir.some((d) => d.email === 'new.person@jetworldwide.example' && d.pending && d.can_change), 'a pending invite shows in the list');
+    await tryAs(`select public.invite_user('x@jetworldwide.example', 'X', 'admin', 'AU')`, [], /Only the owner or an admin/, 'management cannot make admins');
+    await tryAs(`select public.update_user($1, 'Chris', 'finance', 'AU', true)`, [chris], /your own/, 'nobody changes their own role');
+    await tryAs(`select public.invite_user('y@jetworldwide.example', 'Y', 'customer_user', 'AU')`, [], /customer account/);
+    await db.query(`select public.invite_user('early@jetworldwide.example', 'Early Bird', 'customer_service', 'AU')`);
+    assert.equal((await one(`select role from public.profiles where id = $1`, [early2])).role, 'customer_service', 'someone already signed in gets the role straight away');
+    await db.query(`select public.update_user($1, 'Monica', 'finance', 'AU', false)`, [monica]);
+    assert.equal((await one(`select active from public.profiles where id = $1`, [monica])).active, false, 'switched off');
+    const r = await db.query(`update public.profiles set role = 'owner' where id = $1`, [sam]);
+    assert.equal(r.affectedRows, 0, 'profiles only change through the functions');
+    assert.ok(Number((await one(`select count(*) from public.audit_log where table_name in ('user_invites', 'profiles')`)).count) >= 3, 'changes are in the audit log');
+  });
+  await as(priya, 'priya@harbouroptics.example', async () => {
+    await db.query(`select public.invite_user('tom@harbouroptics.example', 'Tom', 'customer_user', null, $1)`, [HARBOUR]);
+    await tryAs(`select public.invite_user('z@other.example', 'Z', 'customer_user', null, $1)`, [PHARMA], /own company/, 'a customer admin cannot add people elsewhere');
+    await tryAs(`select public.invite_user('z@other.example', 'Z', 'finance', 'AU')`, [], /own company/, 'or make Jet staff');
+    await tryAs(`select public.invite_user('chris@jetworldwide.example', 'Chris', 'customer_user', null, $1)`, [HARBOUR], /already has an account/, 'or take over a Jet account');
+    await tryAs(`select public.update_user($1, 'Chris', 'management', 'AU', false)`, [chris], /own company/, 'or switch off Jet staff');
+    const dir = (await db.query(`select email, customer_id from public.user_directory()`)).rows;
+    assert.ok(dir.length >= 2 && dir.every((d) => d.customer_id === HARBOUR), 'a customer admin sees only their own company');
+  });
+  await as(sam, 'sam@jetworldwide.example', async () => {
+    await assert.rejects(db.query(`select public.invite_user('q@jetworldwide.example', 'Q', 'finance', 'AU')`), /can't manage users/);
+  });
+  results.push('  ✓ user management: management invites and changes staff and portal users (not admins, not themselves); customer admins manage only their own company; all audited');
 };
 
 try {

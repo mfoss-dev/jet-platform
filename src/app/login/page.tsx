@@ -51,7 +51,7 @@ export default async function LoginPage({ searchParams }: PageProps<'/login'>) {
             <div className="banner">Check <b>{sent}</b> for a sign-in link. It works once and expires after an hour.</div>
           ) : (
             <>
-              <div><label htmlFor="email">Work email</label><input id="email" name="email" type="email" autoComplete="email" required /></div>
+              <div><label htmlFor="email">Work email</label><input id="email" name="email" type="email" autoComplete="email" defaultValue={one(sp.email) ?? ''} required /></div>
               <input type="hidden" name="next" value={one(sp.next) ?? '/'} />
               <button className="btn primary block">Email me a sign-in link</button>
             </>

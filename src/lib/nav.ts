@@ -27,7 +27,7 @@ export const APPS: Record<AppKey, { name: string; short: string; icon: IconName;
     groups: [
       ['Daily work', [{ key: 'today', label: 'Today', icon: 'home', live: true }, { key: 'feed', label: 'Billing feed', icon: 'list', live: true },
         { key: 'monitor', label: 'Shipment monitor', icon: 'monitor' }]],
-      ['Carriers', [{ key: 'reweighs', label: 'Reweighs', icon: 'scale', live: true }, { key: 'cinv', label: 'Carrier invoices', icon: 'inbox' },
+      ['Carriers', [{ key: 'reweighs', label: 'Reweighs', icon: 'scale', live: true }, { key: 'cinv', label: 'Carrier invoices', icon: 'inbox', live: true },
         { key: 'claims', label: 'Credit claims', icon: 'claim' }]],
       ['Billing', [{ key: 'run', label: 'Invoice run', icon: 'play', live: true }, { key: 'invoices', label: 'Invoices & credits', icon: 'doc', live: true },
         { key: 'exports', label: 'Accounting exports', icon: 'export' }]],

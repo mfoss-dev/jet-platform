@@ -13,15 +13,18 @@ export default async function AppsLayout({ children }: LayoutProps<'/'>) {
   // Menu counts. Row-level security means each person only counts what they can see.
   const badges: Record<string, number> = {};
   if (me.apps.includes('stream')) {
-    const [{ count: feed }, { count: reweighs }, { count: credits }] = await Promise.all([
+    const [{ count: feed }, { count: reweighs }, { count: credits }, { count: carrier }] = await Promise.all([
       supabase.from('job_list').select('id', { count: 'exact', head: true }).eq('billing_status', 'needs_attention'),
       supabase.from('reweighs').select('id', { count: 'exact', head: true }).eq('decision', 'pending'),
       // Credit notes this person can approve now (management sees the ones over the limit raised by others).
       supabase.from('credit_note_queue').select('id', { count: 'exact', head: true }).eq('i_can_approve', true),
+      // Carrier invoice exceptions still to decide.
+      supabase.from('carrier_invoice_lines').select('id', { count: 'exact', head: true }).eq('decision', 'pending').neq('issues', '{}'),
     ]);
     badges['stream/feed'] = feed ?? 0;
     badges['stream/reweighs'] = reweighs ?? 0;
     badges['stream/invoices'] = credits ?? 0;
+    badges['stream/cinv'] = carrier ?? 0;
   }
 
   return (

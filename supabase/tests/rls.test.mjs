@@ -505,6 +505,56 @@ const run = async () => {
     assert.equal(Number((await one(`select count(*) from public.sales_accounts()`)).count), 0, 'customers see no sales figures');
   });
   results.push("  ✓ JetSales: management sees every account's sales and health, a rep only their own, customers nothing; duties left out unless asked");
+
+  // ---- carrier invoices: DHL lines matched to Jet's jobs, exceptions decided
+  await db.query(`insert into public.shipment_waybills (connote, branch_code, carrier_code, provider, waybill) values ('CX3', 'AU', 'DHL', 'DHLEXP', '3330000003')`);
+  const dhlLine = (no, waybill, reference, total, tax, extras, billed, oc = 'AU', dc = 'AU') => ({
+    line_no: no, waybill, reference, shipped_on: '2026-10-20', product: 'N', pieces: 1, orig_country: oc, dest_country: dc,
+    billed_kg: billed, weight_charge: total - extras.reduce((a, e) => a + e.amount, 0), extras, total_ex: total, tax,
+  });
+  const dhlInvoice = (number) => JSON.stringify({ carrier_code: 'DHL', branch_code: 'AU', invoice_number: number, invoice_date: '2026-10-31', total_ex: 0, tax: 0 });
+  await as(chris, 'chris@jetworldwide.example', async () => {
+    await db.query(`insert into public.charges (branch_code, customer_id, connote, shipped_on, kind, code, description, charge, fuel, weight, orig_country, dest_country, source) values
+      ('AU', $1, 'CX1', '2026-10-20', 'freight', '.FREIGHT', 'Freight', 50, 10, 2, 'AU', 'AU', 'demo'),
+      ('AU', $1, 'CX2', '2026-10-20', 'freight', '.FREIGHT', 'Freight', 100, 0, 5, 'AU', 'NZ', 'demo'),
+      ('AU', $1, 'CX2', '2026-10-20', 'freight', 'RAS', 'Remote area', 20, 0, 5, 'AU', 'NZ', 'demo'),
+      ('AU', $2, 'CX3', '2026-10-20', 'freight', '.FREIGHT', 'Freight', 40, 0, 3, 'AU', 'AU', 'demo')`, [HARBOUR, PHARMA]);
+    const id = (await one(`select public.import_carrier_invoice($1::jsonb, $2::jsonb) as id`, [dhlInvoice('SYDR1'), JSON.stringify([
+      dhlLine(1, '1110000001', 'CX1', 70, 7, [{ code: 'FF', name: 'FUEL SURCHARGE', amount: 15 }], 2),
+      dhlLine(2, '2220000002', 'CX2', 110, 0, [{ code: 'FF', name: 'FUEL SURCHARGE', amount: 10 }, { code: 'OO', name: 'REMOTE AREA DELIVERY', amount: 20 }], 7, 'AU', 'NZ'),
+      dhlLine(3, '3330000003', '', 60, 6, [{ code: 'YB', name: 'OVERSIZE PIECE', amount: 25 }], 3),
+      dhlLine(4, '4440000004', 'NOPE', 15, 1.5, [], 1),
+    ])])).id;
+    const lines = Object.fromEntries((await db.query(`select line_no, connote, issues, at_stake::float, id from public.carrier_invoice_lines where invoice_id = $1`, [id])).rows.map((r) => [r.line_no, r]));
+    assert.deepEqual([lines[1].connote, lines[1].issues, lines[1].at_stake], ['CX1', ['below_cost'], 10], 'matched by connote, billed $10 under cost');
+    assert.deepEqual([lines[2].issues, lines[2].at_stake], [['heavier'], 0], "Jet's add-on covers the surcharge; DHL billed 7 kg against 5");
+    assert.deepEqual([lines[3].connote, lines[3].issues, lines[3].at_stake], ['CX3', ['below_cost', 'surcharge'], 25], 'matched by waybill; an oversize surcharge not passed on');
+    assert.deepEqual([lines[4].connote, lines[4].issues, lines[4].at_stake], [null, ['no_job'], 15], 'a shipment Jet has no job for');
+    assert.equal((await one(`select treatment from public.carrier_charge_codes where carrier_code = 'DHL' and code = 'YB'`)).treatment, 'review', 'new surcharge codes start as review');
+
+    await tryAs(`select public.import_carrier_invoice($1::jsonb, $2::jsonb)`, [dhlInvoice('SYDR1'), JSON.stringify([dhlLine(1, '9', '', 1, 0, [], 1)])], /already loaded/, 'the same invoice can only be loaded once');
+    await tryAs(`select public.decide_carrier_lines(array[$1]::uuid[], 'pass_on')`, [lines[4].id], /no Jet job/, 'nothing to pass on without a customer');
+    assert.equal(Number((await one(`select public.decide_carrier_lines(array[$1]::uuid[], 'pass_on', 'Oversize') as n`, [lines[3].id])).n), 1);
+    const passed = await one(`select c.customer_id, c.charge::float, c.gst::float, c.status, c.description from public.charges c join public.carrier_invoice_lines l on l.passed_charge_id = c.id where l.id = $1`, [lines[3].id]);
+    assert.deepEqual([passed.customer_id, passed.charge, passed.gst, passed.status], [PHARMA, 25, 2.5, 'new'], 'passing on adds a charge for the next invoice run, GST as DHL charged it');
+    assert.match(passed.description, /Oversize Piece/);
+    await db.query(`select public.decide_carrier_lines(array[$1, $2]::uuid[], 'absorb')`, [lines[1].id, lines[4].id]);
+    assert.equal(Number((await one(`select open from public.carrier_invoice_summary where id = $1`, [id])).open), 1, 'one exception left to decide');
+
+    const second = (await one(`select public.import_carrier_invoice($1::jsonb, $2::jsonb) as id`, [dhlInvoice('SYDR2'), JSON.stringify([dhlLine(1, '1110000001', 'CX1', 60, 6, [], 2)])])).id;
+    assert.deepEqual((await one(`select issues from public.carrier_invoice_lines where invoice_id = $1`, [second])).issues, ['duplicate'], 'a waybill already charged on an earlier invoice');
+    await db.query(`select public.set_carrier_charge_treatment('DHL', 'OO', 'included')`);
+    await tryAs(`select public.remove_carrier_invoice($1)`, [id], /passed on/, 'an invoice with charges passed on stays');
+    await db.query(`select public.remove_carrier_invoice($1)`, [second]);
+    assert.ok(Number((await one(`select count(*) from public.audit_log where table_name = 'carrier_invoices'`)).count) >= 3, 'loads and decisions are audited');
+
+    await db.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: priya, email: 'priya@harbouroptics.example' })]);
+    assert.equal(Number((await one(`select count(*) from public.carrier_invoice_lines`)).count), 0, 'customers never see carrier costs');
+    await tryAs(`select public.import_carrier_invoice($1::jsonb, $2::jsonb)`, [dhlInvoice('SYDR3'), JSON.stringify([dhlLine(1, '9', '', 1, 0, [], 1)])], /Only finance and management/);
+    await db.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: sam, email: 'sam@jetworldwide.example' })]);
+    assert.equal(Number((await one(`select count(*) from public.carrier_invoices`)).count), 0, 'nor do sales reps');
+  });
+  results.push('  ✓ carrier invoices: DHL lines matched by connote or waybill; never billed, under cost, surcharges, heavier and duplicates flagged; pass on adds a charge; staff only');
 };
 
 try {

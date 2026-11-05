@@ -66,6 +66,10 @@ const invoiceLines = q(`select t.BranchCode, t.ChargeAccount, t.CustomerCode, t.
         union all select ConnoteNo, ShipmentDate, ServiceCode, Pieces, Weight, SenderCountryCode, ReceiverCountryCode, Status from arcBilling) b on b.ConnoteNo = t.ConnoteNo
   where t.Status not like 'DEL%'`);
 console.log(`  ${invoiceLines.length} charge lines (invoiced and unbilled)`);
+// Each job's carrier and waybill (Billing.Provider / ProviderID), so carrier invoices can be matched by waybill too.
+const waybills = q(`select ConnoteNo, BranchCode, Provider, ProviderID from (select ConnoteNo, BranchCode, Provider, ProviderID, ShipmentDate from Billing
+  union all select ConnoteNo, BranchCode, Provider, ProviderID, ShipmentDate from arcBilling) b where ProviderID <> '' and ShipmentDate >= '20250101'`);
+console.log(`  ${waybills.length} carrier waybills since 2025`);
 
 // Automatically rated jobs billed this year with their freight line: the pricing review re-prices them on other tariffs.
 const shipments = q(`select b.ConnoteNo, b.BranchCode, b.CustomerCode, b.ServiceCode, b.ShipmentDate, b.ConsignmentType, b.SenderCountryCode,
@@ -406,6 +410,14 @@ chunked('17-invoices', invoiceRows, 1500, (rows) => `insert into public.invoices
 ${rows.map((i) => `(${[i.id, i.run_id, i.branch, i.number, i.kind, i.bill_to, i.date, i.due, r2c(i.charge), r2c(i.fuel), r2c(i.security), r2c(i.gst), r2c(i.charge + i.fuel + i.security + i.gst), i.status].map(lit).join(', ')}, 'jetstream')`).join(',\n')};`);
 chunked('18-charges', chargeUnique, 2000, (rows) => `insert into public.charges (id, branch_code, customer_id, connote, shipped_on, service_code, kind, code, description, charge, fuel, security, gst, income_account, pieces, weight, orig_country, dest_country, status, invoice_id, source) values
 ${rows.map((c) => `(${[c.id, c.branch, c.customer, c.connote, c.shipped, c.service, c.kind, c.code, c.description, c.charge, c.fuel, c.security, c.gst, c.account, c.pieces, c.weight, c.oc, c.dc, c.status, invoiceIds.has(c.invoice) ? c.invoice : null].map(lit).join(', ')}, 'jetstream')`).join(',\n')};`);
+const PROVIDER = { DHLEXP: 'DHL', TNTEXP: 'TNT', STR: 'STARTRACK' };
+const waybillRows = [...new Map(waybills.filter((w) => BRANCH[t(w.BranchCode)] && t(w.ProviderID)).map((w) => [t(w.ConnoteNo), {
+  connote: t(w.ConnoteNo), branch: BRANCH[t(w.BranchCode)], carrier: PROVIDER[t(w.Provider)] ?? t(w.Provider), provider: t(w.Provider), waybill: t(w.ProviderID),
+}])).values()];
+write('21-waybills-000', `delete from public.shipment_waybills where source = 'jetstream';`);
+chunked('21-waybills', waybillRows, 5000, (rows) => `insert into public.shipment_waybills (connote, branch_code, carrier_code, provider, waybill) values
+${values(rows, ['connote', 'branch', 'carrier', 'provider', 'waybill'])}
+on conflict (connote) do update set carrier_code = excluded.carrier_code, provider = excluded.provider, waybill = excluded.waybill;`);
 write('19-invoice-numbers', `insert into public.invoice_sequences (branch_code, next_number) values ('AU', ${nextNumber.AU}), ('NZ', ${nextNumber.NZ})
 on conflict (branch_code) do update set next_number = greatest(public.invoice_sequences.next_number, excluded.next_number);`);
 chunked('14-shipments', shipRows, 2000, (rows) => `insert into public.billed_shipments (connote, customer_id, branch_code, service_code, shipped_on, kind, orig_country, orig_postcode, dest_country, dest_postcode, weight, freight) values

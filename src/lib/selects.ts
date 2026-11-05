@@ -54,4 +54,7 @@ export const SELECTS = {
   unpriced: { table: 'charges', select: 'id, branch_code, connote, shipped_on, code, description, charge, status, customer:customers!charges_customer_id_fkey(name, account_code)' },
   heldCharges: { table: 'charges', select: 'id, branch_code, connote, shipped_on, code, description, charge, fuel, security, gst, status, customer:customers!charges_customer_id_fkey(name, account_code)' },
   customerPicker: { table: 'customers', select: 'id, account_code, name' },
+  carrierInvoices: { table: 'carrier_invoice_summary', select: 'id, carrier_code, branch_code, invoice_number, account_number, invoice_date, due_date, currency, total_ex, tax, file_name, uploaded_at, matched_at, uploaded_by_name, shipments, matched, jet_billed, exceptions, open, open_at_stake, matched_cost' },
+  carrierLines: { table: 'carrier_invoice_lines', select: 'id, line_no, waybill, reference, shipped_on, product_name, pieces, orig_country, dest_country, declared_kg, carrier_kg, declared_vol_kg, carrier_vol_kg, weight_flag, billed_kg, weight_charge, extras, total_ex, tax, connote, jet_kg, jet_billed, jet_addons, review_extras, issues, at_stake, decision, decision_note, decided_at, passed_charge_id, customer:customers!carrier_invoice_lines_customer_id_fkey(name, account_code), decider:profiles!carrier_invoice_lines_decided_by_fkey(full_name)' },
+  carrierCodes: { table: 'carrier_charge_codes', select: 'carrier_code, code, name, treatment, updated_at' },
 } as const;

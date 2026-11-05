@@ -28,17 +28,19 @@ export default async function Today() {
   const supabase = await createClient();
   const w = week();
 
-  const [{ data: runData }, { data: unbilledData }, { data: queueData }, { data: reweighData }, { count: feedCount }] = await Promise.all([
+  const [{ data: runData }, { data: unbilledData }, { data: queueData }, { data: reweighData }, { count: feedCount }, { data: carrierData }] = await Promise.all([
     supabase.from(SELECTS.runSummary.table).select(SELECTS.runSummary.select).neq('status', 'cancelled').or(`status.eq.draft,period_end.gte.${w.sunday}`).order('period_end', { ascending: false }).limit(40),
     supabase.from(SELECTS.unbilled.table).select(SELECTS.unbilled.select).limit(100),
     supabase.from('credit_note_queue').select('id, total, invoice_date, needs_management, i_can_approve').limit(200),
     supabase.from('reweighs').select('extra_charge, created_at').eq('decision', 'pending').limit(2000),
     supabase.from('job_list').select('id', { count: 'exact', head: true }).eq('billing_status', 'needs_attention'),
+    supabase.from(SELECTS.carrierInvoices.table).select('id, invoice_number, open, open_at_stake, uploaded_at').gt('open', 0).limit(50),
   ]);
   const runs = (runData ?? []) as unknown as Run[];
   const unbilled = (unbilledData ?? []) as unknown as Unbilled[];
   const queue = (queueData ?? []) as { id: string; total: number; invoice_date: string; needs_management: boolean; i_can_approve: boolean }[];
   const reweighs = (reweighData ?? []) as { extra_charge: number | null; created_at: string }[];
+  const carrier = (carrierData ?? []) as { id: string; invoice_number: string; open: number; open_at_stake: number; uploaded_at: string }[];
   const oldest = (dates: (string | null | undefined)[]) => dates.filter(Boolean).sort()[0] ?? null;
   const sum = (xs: number[]) => xs.reduce((a, x) => a + Number(x || 0), 0);
 
@@ -63,6 +65,10 @@ export default async function Today() {
     ...(notReady.length ? [{ issue: 'Not priced', tone: 'bad' as const, detail: `${sum(notReady.map((u) => u.shipments))} shipments can't be invoiced until priced`, amount: null, since: oldest(notReady.map((u) => u.oldest)), href: '/stream/run?held=1', action: 'Fix' }] : []),
     ...(held.length ? [{ issue: 'Held charges', tone: 'warn' as const, detail: `${sum(held.map((u) => u.lines))} lines held or marked do-not-bill`, amount: sum(held.map((u) => u.total)), since: oldest(held.map((u) => u.oldest)), href: '/stream/run?held=1', action: 'Review' }] : []),
     ...(reweighs.length ? [{ issue: 'Reweighs', tone: 'warn' as const, detail: `${reweighs.length} carrier weights to pass on or absorb`, amount: sum(reweighs.map((r) => r.extra_charge ?? 0)), since: oldest(reweighs.map((r) => r.created_at)), href: '/stream/reweighs', action: 'Decide' }] : []),
+    ...carrier.map((c) => ({
+      issue: 'Carrier invoice exceptions', tone: 'warn' as const, detail: `DHL ${c.invoice_number}: ${c.open} to pass on, absorb or dispute`,
+      amount: Number(c.open_at_stake), since: c.uploaded_at, href: `/stream/cinv/${c.id}`, action: 'Decide',
+    })),
     ...(feedCount ? [{ issue: 'Billing feed', tone: 'warn' as const, detail: `${feedCount} jobs need attention`, amount: null, since: null, href: '/stream/feed', action: 'Clear' }] : []),
   ].sort((a, b) => Math.abs(b.amount ?? 0) - Math.abs(a.amount ?? 0));
 

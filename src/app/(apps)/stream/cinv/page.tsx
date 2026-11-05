@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { TREATMENT } from '@/lib/carrier-csv';
+import { READERS, TREATMENT } from '@/lib/carrier-csv';
 import { BILLING_EDITORS, day, dayTime, money } from '@/lib/format';
 import { SELECTS } from '@/lib/selects';
 import { getMe } from '@/lib/session';
@@ -16,7 +16,7 @@ type Code = { carrier_code: string; code: string; name: string; treatment: strin
 const pick = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? '';
 const BRANCH: Record<string, string> = { AU: 'Sydney', NZ: 'Auckland' };
 
-// Carrier invoices: load DHL's invoice data file, see how each invoice matched Jet's jobs, and open the exceptions.
+// Carrier invoices: load a carrier's invoice data file, see how each invoice matched Jet's jobs, and open the exceptions.
 export default async function CarrierInvoices({ searchParams }: PageProps<'/stream/cinv'>) {
   const me = await getMe();
   if (!me.apps.includes('stream')) notFound();
@@ -32,13 +32,14 @@ export default async function CarrierInvoices({ searchParams }: PageProps<'/stre
   const codes = (codeData ?? []) as Code[];
   const sum = (f: (i: Summary) => number) => invoices.reduce((a, i) => a + Number(f(i) || 0), 0);
   const open = sum((i) => i.open);
+  const codeCarriers = [...new Set(codes.map((c) => c.carrier_code))];
 
   return (
     <>
       <div className="top">
         <div>
           <h1>Carrier invoices</h1>
-          <div className="sub">DHL&apos;s invoices matched to Jet&apos;s jobs: only the exceptions need a look</div>
+          <div className="sub">Carriers&apos; invoices matched to Jet&apos;s jobs: only the exceptions need a look</div>
         </div>
       </div>
       {msg && <div className={`banner ${/^Not |Not loaded/.test(msg) ? 'warn' : ''}`} role="status">{msg}</div>}
@@ -55,11 +56,12 @@ export default async function CarrierInvoices({ searchParams }: PageProps<'/stre
         <div className="card" style={{ padding: 0, minWidth: 0 }}>
           <div className="tw">
             <table>
-              <thead><tr><th>Invoice</th><th>Date</th><th className="r">Shipments</th><th className="r">Matched</th><th className="r">DHL ex GST</th><th className="r">Open</th><th className="r">At stake</th><th>Loaded</th></tr></thead>
+              <thead><tr><th>Carrier</th><th>Invoice</th><th>Date</th><th className="r">Shipments</th><th className="r">Matched</th><th className="r">Carrier ex GST</th><th className="r">Open</th><th className="r">At stake</th><th>Loaded</th></tr></thead>
               <tbody>
                 {invoices.map((i) => (
                   <tr key={i.id}>
-                    <td><Link href={`/stream/cinv/${i.id}`}><b>{i.invoice_number}</b></Link> <span className="hint">{i.carrier_code} · {BRANCH[i.branch_code] ?? i.branch_code}{i.account_number ? ` · acct ${i.account_number}` : ''}</span></td>
+                    <td><b>{i.carrier_code}</b></td>
+                    <td><Link href={`/stream/cinv/${i.id}`}><b>{i.invoice_number}</b></Link> <span className="hint">{BRANCH[i.branch_code] ?? i.branch_code}{i.account_number ? ` · acct ${i.account_number}` : ''}</span></td>
                     <td>{day(i.invoice_date)}<span className="hint"> · due {day(i.due_date)}</span></td>
                     <td className="r">{i.shipments}</td>
                     <td className="r">{i.matched}{i.shipments ? <span className="hint"> · {Math.round((100 * i.matched) / i.shipments)}%</span> : null}</td>
@@ -69,7 +71,7 @@ export default async function CarrierInvoices({ searchParams }: PageProps<'/stre
                     <td>{dayTime(i.uploaded_at)}<span className="hint">{i.uploaded_by_name ? ` · ${i.uploaded_by_name}` : ''}</span></td>
                   </tr>
                 ))}
-                {!invoices.length && <tr><td colSpan={8} className="hint">No carrier invoices loaded yet.</td></tr>}
+                {!invoices.length && <tr><td colSpan={9} className="hint">No carrier invoices loaded yet.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -78,43 +80,50 @@ export default async function CarrierInvoices({ searchParams }: PageProps<'/stre
         <div className="grid" style={{ alignSelf: 'start' }}>
           {canEdit && (
             <form className="card" action={uploadCarrierInvoices}>
-              <h3>Load a DHL invoice</h3>
-              <p className="hint">The invoice data CSV from DHL MyBill (not the PDF). Several files at once is fine. Names and addresses in the file aren&apos;t kept.</p>
-              <input className="f mt8" type="file" name="file" accept=".csv,text/csv" multiple required aria-label="DHL invoice CSV" />
+              <h3>Load a carrier invoice</h3>
+              <p className="hint">The carrier&apos;s invoice data CSV (not the PDF); the carrier is worked out from the file. Several files at once is fine. Names and addresses in the file aren&apos;t kept.</p>
+              <ul className="hint" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                {READERS.map((r) => <li key={r.carrier}><b>{r.name}:</b> {r.file}</li>)}
+              </ul>
+              <p className="hint">Another carrier needs one sample of its invoice file to be added.</p>
+              <input className="f mt8" type="file" name="file" accept=".csv,text/csv" multiple required aria-label="Carrier invoice CSV" />
               <label className="hint mt8" htmlFor="cinv-branch">Branch</label>
               <select id="cinv-branch" name="branch" className="f" defaultValue="">
-                <option value="">From the file (DHL station)</option><option value="AU">Sydney</option><option value="NZ">Auckland</option>
+                <option value="">From the file</option><option value="AU">Sydney</option><option value="NZ">Auckland</option>
               </select>
               <button className="btn primary mt8">Load and match</button>
             </form>
           )}
           <div className="card">
-            <h3>DHL surcharge codes</h3>
-            <p className="hint">How each surcharge is checked. &quot;Check it was charged&quot; flags shipments where Jet&apos;s add-ons don&apos;t cover it; new codes start there.</p>
-            <table className="mt8">
-              <tbody>
-                {codes.map((c) => (
-                  <tr key={`${c.carrier_code}-${c.code}`}>
-                    <td><b>{c.code}</b> <span className="hint">{c.name.toLowerCase()}</span></td>
-                    <td>
-                      {canEdit ? (
-                        <form action={setChargeTreatment} className="flex">
-                          <input type="hidden" name="carrier" value={c.carrier_code} /><input type="hidden" name="code" value={c.code} />
-                          <select name="treatment" className="f" defaultValue={c.treatment} aria-label={`How ${c.code} is checked`}>
-                            {Object.entries(TREATMENT).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                          </select>
-                          <button className="btn sm">Save</button>
-                        </form>
-                      ) : TREATMENT[c.treatment]}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <h3>Carrier surcharge codes</h3>
+            <p className="hint">How each carrier&apos;s surcharges are checked. &quot;Check it was charged&quot; flags shipments where Jet&apos;s add-ons don&apos;t cover it; new codes start there.</p>
+            {codeCarriers.map((carrier) => (
+              <table className="mt8" key={carrier}>
+                <thead><tr><th colSpan={2}>{carrier}</th></tr></thead>
+                <tbody>
+                  {codes.filter((c) => c.carrier_code === carrier).map((c) => (
+                    <tr key={`${c.carrier_code}-${c.code}`}>
+                      <td><b>{c.code}</b> <span className="hint">{c.name.toLowerCase()}</span></td>
+                      <td>
+                        {canEdit ? (
+                          <form action={setChargeTreatment} className="flex">
+                            <input type="hidden" name="carrier" value={c.carrier_code} /><input type="hidden" name="code" value={c.code} />
+                            <select name="treatment" className="f" defaultValue={c.treatment} aria-label={`How ${c.code} is checked`}>
+                              {Object.entries(TREATMENT).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                            </select>
+                            <button className="btn sm">Save</button>
+                          </form>
+                        ) : TREATMENT[c.treatment]}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
           </div>
           <div className="card">
             <h3>How matching works</h3>
-            <p className="hint">Each DHL line is matched to Jet&apos;s job by the connote (DHL&apos;s shipment reference) or the DHL waybill, then compared with what Jet billed: never billed, below cost, surcharges not passed on, heavier than billed, and waybills charged twice. Passing one on adds a charge to the customer&apos;s next invoice.</p>
+            <p className="hint">Each line on a carrier&apos;s invoice is matched to Jet&apos;s job by the connote (the shipment reference) or that carrier&apos;s waybill, then compared with what Jet billed: never billed, below cost, surcharges not passed on, heavier than billed, and waybills charged twice. Passing one on adds a charge to the customer&apos;s next invoice.</p>
           </div>
         </div>
       </div>

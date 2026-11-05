@@ -20,11 +20,11 @@ type Summary = { id: string; carrier_code: string; branch_code: string; invoice_
 
 const pick = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? '';
 const kg = (n: number | null) => (n == null ? '—' : `${Number(n).toLocaleString('en-AU', { maximumFractionDigits: 2 })} kg`);
-// Which weight DHL billed on.
-const FLAG: Record<string, string> = { A: "customer's scale weight", B: "DHL's scale weight", V: "customer's volume weight", W: "DHL's volume weight", M: 'minimum weight' };
+// Which weight the carrier billed on (DHL's weight flag).
+const FLAG: Record<string, string> = { A: "customer's scale weight", B: "carrier's scale weight", V: "customer's volume weight", W: "carrier's volume weight", M: 'minimum weight' };
 const VIEWS: [string, string][] = [['open', 'To decide'], ...Object.entries(ISSUES).map(([k, v]) => [k, v[0]] as [string, string]), ['decided', 'Decided'], ['all', 'All lines']];
 
-// One carrier invoice: what DHL charged against what Jet billed, line by line, and the exceptions to decide.
+// One carrier invoice: what the carrier charged against what Jet billed, line by line, and the exceptions to decide.
 export default async function CarrierInvoice({ params, searchParams }: PageProps<'/stream/cinv/[id]'>) {
   const me = await getMe();
   if (!me.apps.includes('stream')) notFound();
@@ -47,6 +47,7 @@ export default async function CarrierInvoice({ params, searchParams }: PageProps
   const shown = (view === 'all' ? lines : view === 'decided' ? flagged.filter((l) => l.decision !== 'pending')
     : view === 'open' ? flagged.filter((l) => l.decision === 'pending') : flagged.filter((l) => l.issues.includes(view)))
     .sort((a, b) => (view === 'all' ? a.line_no - b.line_no : Number(b.at_stake) - Number(a.at_stake)));
+  const carrier = invoice.carrier_code;
   const margin = Number(invoice.jet_billed) - Number(invoice.matched_cost);
   const decidable = canEdit && shown.some((l) => l.decision === 'pending' && l.issues.length);
 
@@ -71,7 +72,7 @@ export default async function CarrierInvoice({ params, searchParams }: PageProps
       <div className="grid k4">
         <div className="card kpi"><div className="l">To decide</div><div className="v">{invoice.open}</div><div className="d">{money(invoice.open_at_stake)} at stake</div></div>
         <div className="card kpi"><div className="l">Matched to Jet jobs</div><div className="v">{invoice.matched} of {invoice.shipments}</div><div className="d">{invoice.shipments - invoice.matched} with no Jet job</div></div>
-        <div className="card kpi"><div className="l">Jet billed on those</div><div className="v">{money(invoice.jet_billed)}</div><div className="d">DHL charged {money(invoice.matched_cost)} · ex GST</div></div>
+        <div className="card kpi"><div className="l">Jet billed on those</div><div className="v">{money(invoice.jet_billed)}</div><div className="d">{carrier} charged {money(invoice.matched_cost)} · ex GST</div></div>
         <div className="card kpi"><div className="l">Margin on matched jobs</div><div className="v">{money(margin)}</div><div className="d">{Number(invoice.jet_billed) ? `${Math.round((100 * margin) / Number(invoice.jet_billed))}% of what Jet billed` : '—'}</div></div>
       </div>
 
@@ -90,7 +91,7 @@ export default async function CarrierInvoice({ params, searchParams }: PageProps
           <table>
             <thead><tr>
               {decidable && <th><CheckAll name="line" /></th>}
-              <th>DHL waybill · Jet connote</th><th>Customer</th><th>Shipped</th><th>Weight</th><th className="r">DHL ex GST</th><th className="r">Jet billed</th>
+              <th>{carrier} waybill · Jet connote</th><th>Customer</th><th>Shipped</th><th>Weight</th><th className="r">{carrier} ex GST</th><th className="r">Jet billed</th>
               <th>Surcharges</th><th>Exceptions</th><th className="r">At stake</th><th>Decision</th>
             </tr></thead>
             <tbody>
@@ -104,8 +105,8 @@ export default async function CarrierInvoice({ params, searchParams }: PageProps
                     <td><b>{l.waybill}</b><div className="hint">{l.connote ?? (l.reference ? `ref ${l.reference} · no Jet job` : 'no Jet job')}</div></td>
                     <td>{l.customer ? <>{l.customer.name} <span className="hint">{l.customer.account_code}</span></> : '—'}</td>
                     <td>{day(l.shipped_on)}<div className="hint">{l.orig_country}→{l.dest_country}{l.product_name ? ` · ${l.product_name.toLowerCase()}` : ''}</div></td>
-                    <td title={`Customer scale ${kg(l.declared_kg)}, DHL scale ${kg(l.carrier_kg)}, customer volume ${kg(l.declared_vol_kg)}, DHL volume ${kg(l.carrier_vol_kg)}`}>
-                      DHL {kg(l.billed_kg)}<div className="hint">{l.weight_flag ? `${FLAG[l.weight_flag] ?? l.weight_flag} · ` : ''}Jet {kg(l.jet_kg)}</div>
+                    <td title={`Customer scale ${kg(l.declared_kg)}, ${carrier} scale ${kg(l.carrier_kg)}, customer volume ${kg(l.declared_vol_kg)}, ${carrier} volume ${kg(l.carrier_vol_kg)}`}>
+                      {carrier} {kg(l.billed_kg)}<div className="hint">{l.weight_flag ? `${FLAG[l.weight_flag] ?? l.weight_flag} · ` : ''}Jet {kg(l.jet_kg)}</div>
                     </td>
                     <td className="r">{money(l.total_ex)}<div className="hint">freight {money(l.weight_charge)}{fuel ? ` · fuel ${money(fuel)}` : ''}</div></td>
                     <td className="r">{l.connote ? money(l.jet_billed) : '—'}{Number(l.jet_addons) ? <div className="hint">add-ons {money(l.jet_addons)}</div> : null}</td>
@@ -129,12 +130,12 @@ export default async function CarrierInvoice({ params, searchParams }: PageProps
             <label htmlFor="cl-decision" className="hint">Ticked lines:</label>
             <select id="cl-decision" name="decision" className="f" defaultValue="pass_on" style={{ width: 'auto' }}>
               <option value="pass_on">Pass on to the customer</option><option value="absorb">Absorb (Jet pays)</option>
-              <option value="dispute">Dispute with DHL</option><option value="ok">Fine, nothing to do</option>
+              <option value="dispute">Dispute with {carrier}</option><option value="ok">Fine, nothing to do</option>
             </select>
             <input name="amount" className="f" inputMode="decimal" placeholder="Amount (one line only)" aria-label="Amount to pass on, ex GST" style={{ maxWidth: 190 }} />
             <input name="note" className="f" placeholder="Note (optional)" aria-label="Note" style={{ maxWidth: 260 }} />
             <button className="btn primary">Apply</button>
-            <span className="hint">Passing on adds the amount at stake (ex GST, with GST as DHL charged it) to the customer&apos;s next invoice.</span>
+            <span className="hint">Passing on adds the amount at stake (ex GST, with GST as {carrier} charged it) to the customer&apos;s next invoice.</span>
           </div>
         )}
       </form>

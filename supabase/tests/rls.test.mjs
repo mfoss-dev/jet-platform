@@ -507,7 +507,7 @@ const run = async () => {
   results.push("  ✓ JetSales: management sees every account's sales and health, a rep only their own, customers nothing; duties left out unless asked");
 
   // ---- carrier invoices: DHL lines matched to Jet's jobs, exceptions decided
-  await db.query(`insert into public.shipment_waybills (connote, branch_code, carrier_code, provider, waybill) values ('CX3', 'AU', 'DHL', 'DHLEXP', '3330000003')`);
+  await db.query(`insert into public.shipment_waybills (connote, branch_code, carrier_code, provider, waybill) values ('CX3', 'AU', 'DHL', 'DHLEXP', '3330000003'), ('CX2', 'AU', 'TNT', 'TNTEXP', '4440000004')`);
   const dhlLine = (no, waybill, reference, total, tax, extras, billed, oc = 'AU', dc = 'AU') => ({
     line_no: no, waybill, reference, shipped_on: '2026-10-20', product: 'N', pieces: 1, orig_country: oc, dest_country: dc,
     billed_kg: billed, weight_charge: total - extras.reduce((a, e) => a + e.amount, 0), extras, total_ex: total, tax,
@@ -529,7 +529,7 @@ const run = async () => {
     assert.deepEqual([lines[1].connote, lines[1].issues, lines[1].at_stake], ['CX1', ['below_cost'], 10], 'matched by connote, billed $10 under cost');
     assert.deepEqual([lines[2].issues, lines[2].at_stake], [['heavier'], 0], "Jet's add-on covers the surcharge; DHL billed 7 kg against 5");
     assert.deepEqual([lines[3].connote, lines[3].issues, lines[3].at_stake], ['CX3', ['below_cost', 'surcharge'], 25], 'matched by waybill; an oversize surcharge not passed on');
-    assert.deepEqual([lines[4].connote, lines[4].issues, lines[4].at_stake], [null, ['no_job'], 15], 'a shipment Jet has no job for');
+    assert.deepEqual([lines[4].connote, lines[4].issues, lines[4].at_stake], [null, ['no_job'], 15], "a shipment Jet has no job for (the same number on a TNT job doesn't count)");
     assert.equal((await one(`select treatment from public.carrier_charge_codes where carrier_code = 'DHL' and code = 'YB'`)).treatment, 'review', 'new surcharge codes start as review');
 
     await tryAs(`select public.import_carrier_invoice($1::jsonb, $2::jsonb)`, [dhlInvoice('SYDR1'), JSON.stringify([dhlLine(1, '9', '', 1, 0, [], 1)])], /already loaded/, 'the same invoice can only be loaded once');

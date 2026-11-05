@@ -2,24 +2,24 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { readDhlFile } from '@/lib/carrier-csv';
+import { readCarrierFile } from '@/lib/carrier-csv';
 import { createClient } from '@/lib/supabase/server';
 
 const back = (path: string, msg: string): never => redirect(`${path}${path.includes('?') ? '&' : '?'}msg=${encodeURIComponent(msg)}`);
 
-// Load one or more DHL invoice data files. Each invoice in them is loaded and matched by the database
+// Load one or more carrier invoice data files (the carrier is worked out from each file's layout). Each invoice in them is loaded and matched by the database
 // (import_carrier_invoice checks permission and refuses an invoice that is already loaded).
 export async function uploadCarrierInvoices(formData: FormData) {
   const files = formData.getAll('file').filter((f): f is File => f instanceof File && f.size > 0);
   const branch = String(formData.get('branch') ?? '') || undefined;
-  if (!files.length) back('/stream/cinv', 'Not loaded: choose a DHL invoice CSV first.');
+  if (!files.length) back('/stream/cinv', 'Not loaded: choose a carrier invoice CSV first.');
   const supabase = await createClient();
   const done: string[] = [], failed: string[] = [];
   let lastId = '';
   for (const file of files) {
     let invoices;
     try {
-      invoices = readDhlFile(await file.text(), file.name, branch);
+      invoices = readCarrierFile(await file.text(), file.name, branch);
     } catch (e) {
       failed.push((e as Error).message);
       continue;
@@ -27,7 +27,7 @@ export async function uploadCarrierInvoices(formData: FormData) {
     for (const { lines, ...invoice } of invoices) {
       const { data, error } = await supabase.rpc('import_carrier_invoice', { p_invoice: invoice, p_lines: lines });
       if (error) failed.push(`${invoice.invoice_number}: ${error.message}`);
-      else { done.push(`${invoice.invoice_number} (${lines.length} shipments)`); lastId = String(data); }
+      else { done.push(`${invoice.carrier_code} ${invoice.invoice_number} (${lines.length} shipments)`); lastId = String(data); }
     }
   }
   revalidatePath('/stream', 'layout');
@@ -53,7 +53,7 @@ export async function decideCarrierLines(formData: FormData) {
   revalidatePath('/stream', 'layout');
   if (error) back(path, `Nothing changed: ${error.message}`);
   const n = Number(data ?? 0);
-  const what = { pass_on: 'passed on (charges added for the next invoice run)', absorb: 'absorbed by Jet', dispute: 'marked as disputed with DHL', ok: 'marked fine' }[decision];
+  const what = { pass_on: 'passed on (charges added for the next invoice run)', absorb: 'absorbed by Jet', dispute: 'marked as disputed with the carrier', ok: 'marked fine' }[decision];
   back(path, n ? `${n} line${n === 1 ? '' : 's'} ${what} · logged` : 'Nothing changed: those lines were already decided.');
 }
 

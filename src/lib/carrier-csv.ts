@@ -1,4 +1,6 @@
 // Reads a carrier's invoice data file into invoices and shipment lines for public.import_carrier_invoice.
+// Each carrier lays its file out differently, so each has a reader in READERS; readCarrierFile picks the one whose
+// layout the file has. Adding a carrier = one more reader, written from a sample of that carrier's file.
 // DHL MyBill's CSV: one "I" row per invoice (its totals) and one "S" row per shipment, with the weight charge,
 // up to nine extra charges (XC1–XC9), other charges, discounts and the four weights.
 // Only business fields are read: the file's names, addresses and contacts are never kept.
@@ -50,13 +52,9 @@ const isoDate = (s: string | undefined) => {
 };
 const STATION_BRANCH: Record<string, string> = { SYD: 'AU', MEL: 'AU', BNE: 'AU', AKL: 'NZ', CHC: 'NZ', WLG: 'NZ' };
 
-export const isDhlFile = (header: string[]) => ['Line Type', 'Invoice Number', 'Shipment Number', 'XC1 Code'].every((h) => header.includes(h));
+type Reader = { carrier: string; name: string; file: string; matches: (header: string[]) => boolean; read: (header: string[], rows: string[][], fileName: string, branchOverride?: string) => CarrierInvoice[] };
 
-export function readDhlFile(csv: string, fileName: string, branchOverride?: string): CarrierInvoice[] {
-  const [header, ...rows] = parseCsv(csv.replace(/^﻿/, ''));
-  if (!header || !isDhlFile(header.map((h) => h.trim()))) {
-    throw new Error(`${fileName} isn't a DHL invoice data file (the CSV from MyBill, with "Shipment Number" and "XC1 Code" columns)`);
-  }
+function readDhl(header: string[], rows: string[][], fileName: string, branchOverride?: string): CarrierInvoice[] {
   const col = new Map(header.map((h, i) => [h.trim(), i]));
   const get = (r: string[], name: string) => r[col.get(name) ?? -1];
 
@@ -127,12 +125,29 @@ export function readDhlFile(csv: string, fileName: string, branchOverride?: stri
   return list;
 }
 
+// The carriers whose invoice files can be loaded, in the order they're tried.
+export const READERS: Reader[] = [
+  { carrier: 'DHL', name: 'DHL Express', file: 'the invoice data CSV from MyBill', read: readDhl,
+    matches: (h) => ['Line Type', 'Invoice Number', 'Shipment Number', 'XC1 Code'].every((c) => h.includes(c)) },
+];
+
+// Works out the carrier from the file's columns and reads it.
+export function readCarrierFile(csv: string, fileName: string, branchOverride?: string): CarrierInvoice[] {
+  const [header, ...rows] = parseCsv(csv.replace(/^﻿/, ''));
+  const cols = (header ?? []).map((h) => h.trim());
+  const reader = READERS.find((r) => r.matches(cols));
+  if (!reader) {
+    throw new Error(`${fileName} isn't a carrier invoice file Jet can read yet (${READERS.map((r) => `${r.name}: ${r.file}`).join('; ')})`);
+  }
+  return reader.read(cols, rows, fileName, branchOverride);
+}
+
 export const ISSUES: Record<string, [string, string, string]> = {
-  no_job: ['Never billed', 'bad', 'DHL charged for a shipment Jet has no job for'],
-  duplicate: ['Charged twice', 'bad', 'This waybill is already on an earlier DHL invoice'],
-  below_cost: ['Below cost', 'warn', 'Jet billed less than DHL charged (ex GST)'],
-  surcharge: ['Surcharge', 'warn', "DHL surcharges that Jet's add-ons on the job don't cover"],
-  heavier: ['Heavier', '', 'DHL billed a heavier weight than Jet did'],
+  no_job: ['Never billed', 'bad', 'The carrier charged for a shipment Jet has no job for'],
+  duplicate: ['Charged twice', 'bad', "This waybill is already on an earlier invoice from the same carrier"],
+  below_cost: ['Below cost', 'warn', 'Jet billed less than the carrier charged (ex GST)'],
+  surcharge: ['Surcharge', 'warn', "Carrier surcharges that Jet's add-ons on the job don't cover"],
+  heavier: ['Heavier', '', 'The carrier billed a heavier weight than Jet did'],
 };
 export const DECISIONS: Record<string, [string, string]> = {
   pass_on: ['Passed on', 'ok'], absorb: ['Absorbed', 'warn'], dispute: ['Disputed', ''], ok: ['Fine', 'ok'],
